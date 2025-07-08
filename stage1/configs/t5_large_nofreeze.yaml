@@ -51,7 +51,7 @@ training:
     patience: 3                   # 3エポック改善なしで早期終了
     min_delta: 0.001
     
-  precision: "32"             # NaN対策：AMP無効化、FP32固定
+  precision: "bf16"           # H100最適化：BF16でTensor Core活用
 
 # データ拡張（無効化）
 augmentation:

@@ -32,7 +32,7 @@ training:
   warmup_epochs: 3            # 延長：2→3エポック
   accumulate_grad_batches: 8
   gradient_clip: 0.012        # 5倍データ対応で緩和（0.008→0.012）
-  precision: "32"             # NaN対策：AMP無効化、FP32固定
+  precision: "bf16"           # H100最適化：BF16でTensor Core活用
   
   # 統一されたオプティマイザー設定
   optimizer:

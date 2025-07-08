@@ -186,6 +186,15 @@ def main():
     print("🧠 モデル初期化中...")
     model = Stage1LightningModule(config)
     
+    # PyTorch 2.0 コンパイル最適化（H100で高速化）
+    if torch.__version__ >= '2.0.0':
+        print("🚀 PyTorch 2.0 コンパイル最適化を適用中...")
+        try:
+            model.model = torch.compile(model.model, backend="inductor")
+            print("✅ TorchCompile適用完了")
+        except Exception as e:
+            print(f"⚠️ TorchCompile失敗、通常モード: {e}")
+    
     if torch.cuda.is_available():
         model = model.cuda()
         print(f"✅ CUDA使用: {torch.cuda.get_device_name()}")
