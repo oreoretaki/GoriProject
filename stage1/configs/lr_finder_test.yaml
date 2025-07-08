@@ -4,9 +4,9 @@
 # 共通設定を継承
 extends: shared_base.yaml
 
-# LR Finder設定を有効化（バッチサイズ128用）
+# LR Finder設定を無効化（完了済み）
 lr_finder:
-  enabled: true                   # バッチサイズ128でLR Finder再実行
+  enabled: false                  # LR Finder完了 - 推奨値7.1e-07適用済み
   min_lr: 1e-7                   # 開始学習率を上げる
   max_lr: 1e-2                   # 終了学習率を下げる
   num_training: 200              # ステップ数を増やして詳細に
