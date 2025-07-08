@@ -626,9 +626,9 @@ def main():
         
         # LR Finder設定
         lr_finder_config = config['lr_finder']
-        min_lr = lr_finder_config.get('min_lr', 1e-8)
-        max_lr = lr_finder_config.get('max_lr', 1.0)
-        num_training = lr_finder_config.get('num_training', 100)
+        min_lr = float(lr_finder_config.get('min_lr', 1e-8))
+        max_lr = float(lr_finder_config.get('max_lr', 1.0))
+        num_training = int(lr_finder_config.get('num_training', 100))
         save_path = lr_finder_config.get('save_path', 'lr_finder_results')
         
         # 結果保存ディレクトリ作成
