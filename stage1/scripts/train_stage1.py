@@ -531,16 +531,17 @@ def main():
     print("🧠 モデル初期化中...")
     model = Stage1LightningModule(config)
     
-    # PyTorch 2.0 コンパイル最適化（H100で高速化）
-    if torch.__version__ >= '2.0.0':
-        print("🚀 PyTorch 2.0 コンパイル最適化を適用中...")
-        try:
-            model.model = torch.compile(model.model, backend="inductor")
-            print("✅ TorchCompile適用完了")
-        except Exception as e:
-            print(f"⚠️ TorchCompile失敗、通常モード: {e}")
-    else:
-        print("⚠️ PyTorch 2.0+が必要です（TorchCompileをスキップ）")
+    # PyTorch 2.0 コンパイル最適化（T5-Largeでは初回コンパイル時間が長いため無効化）
+    # if torch.__version__ >= '2.0.0':
+    #     print("🚀 PyTorch 2.0 コンパイル最適化を適用中...")
+    #     try:
+    #         model.model = torch.compile(model.model, backend="inductor")
+    #         print("✅ TorchCompile適用完了")
+    #     except Exception as e:
+    #         print(f"⚠️ TorchCompile失敗、通常モード: {e}")
+    # else:
+    #     print("⚠️ PyTorch 2.0+が必要です（TorchCompileをスキップ）")
+    print("⚠️ TorchCompile無効化（T5-Largeでは初回コンパイル時間が長いため）")
     
     # コールバック設定
     callbacks = []
