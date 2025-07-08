@@ -11,7 +11,7 @@ lr_finder:
   max_lr: 1e-2                   # 終了学習率を下げる
   num_training: 200              # ステップ数を増やして詳細に
   mode: "exponential"            # 学習率増加方法
-  save_path: "lr_finder_results_v3" # バッチサイズ256用結果保存ディレクトリ
+  save_path: "lr_finder_results_v4" # バッチサイズ1024用結果保存ディレクトリ
 
 # T5転移学習設定
 transfer_learning:
@@ -50,9 +50,9 @@ model:
 
 # 訓練設定（LR Finder用）
 training:
-  batch_size: 256                 # H100用バッチサイズ256
+  batch_size: 1024                # H100用バッチサイズ1024
   epochs: 1                       # LR Finderは1エポックのみ
-  accumulate_grad_batches: 1      # 実効バッチサイズ256
+  accumulate_grad_batches: 1      # 実効バッチサイズ1024
   warmup_epochs: 0.1              # 軽いwarmupを追加（10%）
   early_stop:
     patience: 3
@@ -88,7 +88,7 @@ logging:
 # 実行設定
 runtime:
   seed: 42
-  experiment_name: "lr_finder_batch256"
+  experiment_name: "lr_finder_batch1024"
   
 # DataLoader最適化（LR Finder用）
 dataloader:
