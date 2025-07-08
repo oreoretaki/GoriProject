@@ -7,11 +7,11 @@ extends: shared_base.yaml
 # LR Finder設定を有効化（バッチサイズ128用）
 lr_finder:
   enabled: true                   # バッチサイズ128でLR Finder再実行
-  min_lr: 1e-8                   # 開始学習率
-  max_lr: 1.0                    # 終了学習率
-  num_training: 100              # 学習ステップ数
+  min_lr: 1e-7                   # 開始学習率を上げる
+  max_lr: 1e-2                   # 終了学習率を下げる
+  num_training: 200              # ステップ数を増やして詳細に
   mode: "exponential"            # 学習率増加方法
-  save_path: "lr_finder_results" # 結果保存ディレクトリ
+  save_path: "lr_finder_results_v2" # 新しい結果保存ディレクトリ
 
 # T5転移学習設定
 transfer_learning:
@@ -53,7 +53,7 @@ training:
   batch_size: 128                 # H100用バッチサイズ
   epochs: 1                       # LR Finderは1エポックのみ
   accumulate_grad_batches: 2      # 実効バッチサイズ256
-  warmup_epochs: 0                # LR Finderではwarmup不要
+  warmup_epochs: 0.1              # 軽いwarmupを追加（10%）
   early_stop:
     patience: 3
     min_delta: 0.001
