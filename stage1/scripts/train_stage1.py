@@ -619,6 +619,98 @@ def main():
         
     trainer = pl.Trainer(**trainer_kwargs)
     
+    # LR Finder実行（設定で有効化されている場合）
+    if config.get('lr_finder', {}).get('enabled', False):
+        print("🔍 Learning Rate Finder実行中...")
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+        import os
+        
+        # LR Finder設定
+        lr_finder_config = config['lr_finder']
+        min_lr = lr_finder_config.get('min_lr', 1e-8)
+        max_lr = lr_finder_config.get('max_lr', 1.0)
+        num_training = lr_finder_config.get('num_training', 100)
+        save_path = lr_finder_config.get('save_path', 'lr_finder_results')
+        
+        # 結果保存ディレクトリ作成
+        save_dir = Path(save_path)
+        save_dir.mkdir(exist_ok=True)
+        
+        print(f"   範囲: {min_lr:.1e} ～ {max_lr:.1e}")
+        print(f"   ステップ数: {num_training}")
+        
+        try:
+            # PyTorch Lightning の tuner.lr_find 実行
+            lr_finder = trainer.tuner.lr_find(
+                model,
+                train_dataloaders=train_loader,
+                min_lr=min_lr,
+                max_lr=max_lr,
+                num_training=num_training,
+                mode='exponential',
+                early_stop_threshold=4.0,  # 損失が4倍になったら停止
+                update_attr=False  # モデルの学習率は更新しない
+            )
+            
+            # 結果プロット
+            fig = lr_finder.plot(suggest=True, show=False)
+            
+            # 推奨学習率を取得
+            suggested_lr = lr_finder.suggestion()
+            
+            # プロット保存
+            plot_path = save_dir / "lr_finder_plot.png"
+            fig.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            
+            # 結果ファイル保存
+            results_path = save_dir / "lr_finder_results.txt"
+            with open(results_path, 'w') as f:
+                f.write(f"Learning Rate Finder Results\n")
+                f.write(f"=" * 40 + "\n")
+                f.write(f"Configuration:\n")
+                f.write(f"  Min LR: {min_lr:.1e}\n")
+                f.write(f"  Max LR: {max_lr:.1e}\n")
+                f.write(f"  Steps: {num_training}\n")
+                f.write(f"\nResults:\n")
+                f.write(f"  Suggested LR: {suggested_lr:.1e}\n")
+                f.write(f"  Current base_lr: {config['training']['optimizer']['lr']:.1e}\n")
+                if 't5_lr_top' in config['training']:
+                    f.write(f"  Current t5_lr_top: {config['training']['t5_lr_top']:.1e}\n")
+                f.write(f"\nRecommendations:\n")
+                f.write(f"  - Set optimizer.lr to: {suggested_lr:.1e}\n")
+                if 't5_lr_top' in config['training']:
+                    t5_suggested = suggested_lr * 0.25  # T5用により低い学習率
+                    f.write(f"  - Set t5_lr_top to: {t5_suggested:.1e}\n")
+            
+            print(f"✅ LR Finder完了")
+            print(f"   推奨学習率: {suggested_lr:.1e}")
+            print(f"   現在の学習率: {config['training']['optimizer']['lr']:.1e}")
+            print(f"   プロット: {plot_path}")
+            print(f"   詳細結果: {results_path}")
+            
+            # T5使用時の推奨値も表示
+            if 't5_lr_top' in config['training']:
+                current_t5_lr = config['training']['t5_lr_top']
+                t5_suggested = suggested_lr * 0.25
+                print(f"   T5現在値: {current_t5_lr:.1e}")
+                print(f"   T5推奨値: {t5_suggested:.1e}")
+            
+            print("\n💡 推奨アクション:")
+            print(f"   1. shared_base.yaml の optimizer.lr を {suggested_lr:.1e} に設定")
+            if 't5_lr_top' in config['training']:
+                print(f"   2. shared_base.yaml の t5_lr_top を {suggested_lr * 0.25:.1e} に設定")
+            print("   3. 設定を保存して再度訓練を実行")
+            
+            # LR Finder実行後は終了
+            print("\n🔄 LR Finder完了。設定を更新して再実行してください。")
+            return
+            
+        except Exception as e:
+            print(f"❌ LR Finder実行エラー: {e}")
+            print("⚠️  通常の訓練を続行します...")
+    
     # ドライラン処理
     if args.dry_run:
         print("🧪 ドライラン実行中...")

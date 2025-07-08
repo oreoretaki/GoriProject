@@ -116,3 +116,12 @@ dataloader:
 development:
   limit_train_batches: 200        # ライト版検証用
   limit_val_batches: 40           # ライト版検証用
+
+# LR Finder設定
+lr_finder:
+  enabled: false                  # true にすると LR Finder 実行
+  min_lr: 1e-8                   # 開始学習率
+  max_lr: 1.0                    # 終了学習率
+  num_training: 100              # 学習ステップ数
+  mode: "exponential"            # 学習率増加方法
+  save_path: "lr_finder_results" # 結果保存ディレクトリ
