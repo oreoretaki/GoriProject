@@ -168,7 +168,10 @@ class Stage1LightningModule(pl.LightningModule):
         """エポック開始時の初期化"""
         self.overflow_count = 0
         self._amp_scale_start = None
-        if hasattr(self.trainer, 'precision_plugin') and hasattr(self.trainer.precision_plugin, 'scaler'):
+        # BF16では scaler が None のため、安全にアクセス
+        if (hasattr(self.trainer, 'precision_plugin') and 
+            hasattr(self.trainer.precision_plugin, 'scaler') and 
+            self.trainer.precision_plugin.scaler is not None):
             self._amp_scale_start = self.trainer.precision_plugin.scaler.get_scale()
     
     def on_after_backward(self) -> None:
@@ -191,7 +194,9 @@ class Stage1LightningModule(pl.LightningModule):
         
         # ---- 2) AMPオーバーフロー検知（GradScalerから正確に取得）----
         overflow = 0.0
-        if hasattr(self.trainer, 'precision_plugin') and hasattr(self.trainer.precision_plugin, 'scaler'):
+        if (hasattr(self.trainer, 'precision_plugin') and 
+            hasattr(self.trainer.precision_plugin, 'scaler') and 
+            self.trainer.precision_plugin.scaler is not None):
             scaler = self.trainer.precision_plugin.scaler
             # スケールが0ならオーバーフロー発生
             if hasattr(scaler, '_scale') and scaler._scale is not None:
