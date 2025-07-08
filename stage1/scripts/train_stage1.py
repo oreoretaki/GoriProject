@@ -639,8 +639,10 @@ def main():
         print(f"   ステップ数: {num_training}")
         
         try:
-            # PyTorch Lightning の tuner.lr_find 実行
-            lr_finder = trainer.tuner.lr_find(
+            # PyTorch Lightning 2.4.0 対応の LR Finder実行
+            from pytorch_lightning.tuner import Tuner
+            tuner = Tuner(trainer)
+            lr_finder = tuner.lr_find(
                 model,
                 train_dataloaders=train_loader,
                 min_lr=min_lr,
