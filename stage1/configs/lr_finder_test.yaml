@@ -4,9 +4,9 @@
 # 共通設定を継承
 extends: shared_base.yaml
 
-# LR Finder設定を無効化（完了済み）
+# LR Finder設定を有効化（バッチサイズ128用）
 lr_finder:
-  enabled: false                  # LR Finder完了済み
+  enabled: true                   # バッチサイズ128でLR Finder再実行
   min_lr: 1e-8                   # 開始学習率
   max_lr: 1.0                    # 終了学習率
   num_training: 100              # 学習ステップ数
@@ -50,8 +50,9 @@ model:
 
 # 訓練設定（LR Finder用）
 training:
+  batch_size: 128                 # H100用バッチサイズ
   epochs: 1                       # LR Finderは1エポックのみ
-  accumulate_grad_batches: 8      # メモリ余裕があるので据え置き
+  accumulate_grad_batches: 2      # 実効バッチサイズ256
   warmup_epochs: 0                # LR Finderではwarmup不要
   early_stop:
     patience: 3
