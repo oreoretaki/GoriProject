@@ -4,9 +4,9 @@
 # 共通設定を継承
 extends: shared_base.yaml
 
-# LR Finder設定を有効化
+# LR Finder設定を無効化（完了済み）
 lr_finder:
-  enabled: true                   # LR Finder実行
+  enabled: false                  # LR Finder完了済み
   min_lr: 1e-8                   # 開始学習率
   max_lr: 1.0                    # 終了学習率
   num_training: 100              # 学習ステップ数
