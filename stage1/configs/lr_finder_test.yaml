@@ -4,14 +4,14 @@
 # 共通設定を継承
 extends: shared_base.yaml
 
-# LR Finder設定を無効化（完了済み）
+# LR Finder設定（バッチサイズ256用）
 lr_finder:
-  enabled: false                  # LR Finder完了 - 推奨値7.1e-07適用済み
+  enabled: true                   # バッチサイズ256用のLR Finder有効化
   min_lr: 1e-7                   # 開始学習率を上げる
   max_lr: 1e-2                   # 終了学習率を下げる
   num_training: 200              # ステップ数を増やして詳細に
   mode: "exponential"            # 学習率増加方法
-  save_path: "lr_finder_results_v2" # 新しい結果保存ディレクトリ
+  save_path: "lr_finder_results_v3" # バッチサイズ256用結果保存ディレクトリ
 
 # T5転移学習設定
 transfer_learning:
@@ -50,9 +50,9 @@ model:
 
 # 訓練設定（LR Finder用）
 training:
-  batch_size: 128                 # H100用バッチサイズ
+  batch_size: 256                 # H100用バッチサイズ256
   epochs: 1                       # LR Finderは1エポックのみ
-  accumulate_grad_batches: 2      # 実効バッチサイズ256
+  accumulate_grad_batches: 1      # 実効バッチサイズ256
   warmup_epochs: 0.1              # 軽いwarmupを追加（10%）
   early_stop:
     patience: 3
@@ -88,7 +88,7 @@ logging:
 # 実行設定
 runtime:
   seed: 42
-  experiment_name: "lr_finder_test"
+  experiment_name: "lr_finder_batch256"
   
 # DataLoader最適化（LR Finder用）
 dataloader:

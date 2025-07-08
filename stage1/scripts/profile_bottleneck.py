@@ -152,10 +152,15 @@ def main():
     config = load_config(config_path)
     config['data']['data_dir'] = "../data/derived"
     
-    # 小さなバッチサイズでテスト
+    # バッチサイズ256用の設定確認
+    print(f"📊 バッチサイズ: {config['training']['batch_size']}")
+    print(f"📊 accumulate_grad_batches: {config['training']['accumulate_grad_batches']}")
+    print(f"📊 実効バッチサイズ: {config['training']['batch_size'] * config['training']['accumulate_grad_batches']}")
+    
+    # バッチサイズ256用のテスト設定
     config['development'] = {
-        'limit_train_batches': 50,
-        'limit_val_batches': 10
+        'limit_train_batches': 25,    # バッチサイズ256用に減少
+        'limit_val_batches': 5        # バッチサイズ256用に減少
     }
     
     print("📊 データローダー作成中...")
