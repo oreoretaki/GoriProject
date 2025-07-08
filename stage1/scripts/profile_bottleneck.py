@@ -36,23 +36,40 @@ def profile_data_loading(train_loader, num_batches=10):
     """データローディング性能を測定"""
     print("🔍 データローディング性能測定中...")
     
-    times = []
+    load_times = []
+    transfer_times = []
+    
     for i, batch in enumerate(train_loader):
         if i >= num_batches:
             break
         
-        start_time = time.time()
-        # データをGPUに転送
+        load_start = time.time()
+        # データロード完了
+        load_end = time.time()
+        
+        # GPU転送時間測定
+        transfer_start = time.time()
         if torch.cuda.is_available():
             batch = {k: v.cuda() if torch.is_tensor(v) else v for k, v in batch.items()}
-        end_time = time.time()
+        transfer_end = time.time()
         
-        times.append(end_time - start_time)
-        print(f"  Batch {i+1}: {times[-1]:.3f}s")
+        load_time = load_end - load_start
+        transfer_time = transfer_end - transfer_start
+        total_time = load_time + transfer_time
+        
+        load_times.append(load_time)
+        transfer_times.append(transfer_time)
+        
+        print(f"  Batch {i+1}: Load {load_time:.3f}s + Transfer {transfer_time:.3f}s = {total_time:.3f}s")
     
-    avg_time = sum(times) / len(times)
-    print(f"📊 平均データロード時間: {avg_time:.3f}s/batch")
-    return avg_time
+    avg_load = sum(load_times) / len(load_times)
+    avg_transfer = sum(transfer_times) / len(transfer_times)
+    avg_total = avg_load + avg_transfer
+    
+    print(f"📊 平均データロード時間: {avg_load:.3f}s/batch")
+    print(f"📊 平均GPU転送時間: {avg_transfer:.3f}s/batch")
+    print(f"📊 平均総時間: {avg_total:.3f}s/batch")
+    return avg_total
 
 def profile_model_forward(model, train_loader, num_batches=5):
     """モデルforward pass性能を測定"""

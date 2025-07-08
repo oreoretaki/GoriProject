@@ -86,6 +86,9 @@ runtime:
 # DataLoader最適化（T5用）- shared_baseから継承されるが、T5用に調整
 dataloader:
   num_workers: 12                 # 18→12に削減（プロセス制御問題回避）
+  pin_memory: true                # GPU転送高速化
+  persistent_workers: true        # プロセス立ち上げオーバーヘッド削減
+  prefetch_factor: 6              # 先読み強化（2→6）
 
 # 開発用設定（総データ量の10%程度）
 development:
