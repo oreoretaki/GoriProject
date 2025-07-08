@@ -1,0 +1,15 @@
+Learning Rate Finder Results
+========================================
+Configuration:
+  Min LR: 1.0e-08
+  Max LR: 1.0e+00
+  Steps: 100
+
+Results:
+  Suggested LR: 5.8e-07
+  Current base_lr: 3.0e-05
+  Current t5_lr_top: 7.5e-06
+
+Recommendations:
+  - Set optimizer.lr to: 5.8e-07
+  - Set t5_lr_top to: 1.4e-07
