@@ -1,0 +1,7 @@
+# 環境のみ：ソースコードはvast.aiでgit cloneする
+# すべてを除外
+*
+
+# 環境構築に必要なファイルのみ
+!Dockerfile
+!requirements.txt

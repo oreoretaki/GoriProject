@@ -1,0 +1,29 @@
+# Stage 1 依存関係
+
+# 基本的な機械学習スタック
+torch>=2.0.0
+pytorch-lightning>=2.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=12.0.0
+
+# 追加ライブラリ
+tensorboard
+matplotlib
+seaborn
+tqdm
+omegaconf
+torchmetrics
+psutil
+
+# T5転移学習用
+transformers>=4.42.0
+sentencepiece>=0.1.99
+
+# 開発ツール（オプション）
+black
+isort
+flake8
+pytest
+pytest-cov
+mypy

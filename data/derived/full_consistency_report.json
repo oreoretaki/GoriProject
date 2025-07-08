@@ -1,0 +1,125 @@
+{
+  "validation_timestamp": "2025-07-05T14:22:44.422421",
+  "validation_version": "2.0.0",
+  "tf_consistency_results": {
+    "m5": {
+      "total_periods": 630474,
+      "open_matches": 630474,
+      "high_matches": 630474,
+      "low_matches": 630474,
+      "close_matches": 630474,
+      "all_ohlc_matches": 630474,
+      "consistency_rates": {
+        "open": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "close": 1.0,
+        "overall": 1.0
+      },
+      "mismatch_sample": []
+    },
+    "m15": {
+      "total_periods": 210477,
+      "open_matches": 210477,
+      "high_matches": 210477,
+      "low_matches": 210477,
+      "close_matches": 210477,
+      "all_ohlc_matches": 210477,
+      "consistency_rates": {
+        "open": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "close": 1.0,
+        "overall": 1.0
+      },
+      "mismatch_sample": []
+    },
+    "m30": {
+      "total_periods": 105252,
+      "open_matches": 105252,
+      "high_matches": 105252,
+      "low_matches": 105252,
+      "close_matches": 105252,
+      "all_ohlc_matches": 105252,
+      "consistency_rates": {
+        "open": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "close": 1.0,
+        "overall": 1.0
+      },
+      "mismatch_sample": []
+    },
+    "h1": {
+      "total_periods": 52632,
+      "open_matches": 52632,
+      "high_matches": 52632,
+      "low_matches": 52632,
+      "close_matches": 52632,
+      "all_ohlc_matches": 52632,
+      "consistency_rates": {
+        "open": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "close": 1.0,
+        "overall": 1.0
+      },
+      "mismatch_sample": []
+    },
+    "h4": {
+      "total_periods": 13601,
+      "open_matches": 13601,
+      "high_matches": 13601,
+      "low_matches": 13601,
+      "close_matches": 13601,
+      "all_ohlc_matches": 13601,
+      "consistency_rates": {
+        "open": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "close": 1.0,
+        "overall": 1.0
+      },
+      "mismatch_sample": []
+    },
+    "d": {
+      "total_periods": 2640,
+      "open_matches": 2640,
+      "high_matches": 2640,
+      "low_matches": 2640,
+      "close_matches": 2640,
+      "all_ohlc_matches": 2640,
+      "consistency_rates": {
+        "open": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "close": 1.0,
+        "overall": 1.0
+      },
+      "mismatch_sample": []
+    }
+  },
+  "data_integrity_hashes": {
+    "m5_hash": "995a5d23c0603c6324c0167160b0e483",
+    "m5_size": 10663083,
+    "m15_hash": "d2f47b20ac9cf63ff4b9228e120438f2",
+    "m15_size": 4262091,
+    "m30_hash": "8aae582a196f0a89170e9ad9cd4444c7",
+    "m30_size": 2426956,
+    "h1_hash": "b81ee065ed42a11aa298400a340091a8",
+    "h1_size": 1315596,
+    "h4_hash": "e294fe55e53861d03eac48080c968594",
+    "h4_size": 405588,
+    "d_hash": "35c9d9a561cdea1e2da26c59639e87ad",
+    "d_size": 90447
+  },
+  "stage0_ready": {
+    "ready": true,
+    "criteria": {
+      "all_tf_generated": true,
+      "consistency_above_99pct": true,
+      "no_critical_errors": true
+    },
+    "assessment_time": "2025-07-05T14:22:44.422472"
+  }
+}

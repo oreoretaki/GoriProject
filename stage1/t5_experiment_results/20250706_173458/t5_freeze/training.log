@@ -1,0 +1,14 @@
+[rank: 0] Seed set to 42
+🚀 Stage 1 訓練開始
+   設定ファイル: configs/t5_freeze.yaml
+   データディレクトリ: ../data/derived
+   デバイス数: 1
+📊 データローダー作成中...
+Traceback (most recent call last):
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 632, in <module>
+    main()
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 494, in main
+    train_loader, val_loader = create_stage1_dataloaders(args.data_dir, config)
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/src/data_loader.py", line 141, in create_stage1_dataloaders
+    batch_size = config['training']['batch_size']
+KeyError: 'batch_size'

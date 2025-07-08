@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Stage 0 サンプルOHLCプロット</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .tf-section { margin: 20px 0; border: 1px solid #ddd; padding: 15px; }
+        .plot-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+        .plot-item { border: 1px solid #ccc; padding: 10px; }
+        .plot-item img { max-width: 400px; height: auto; }
+        .stats { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>🎯 Stage 0 サンプルOHLCプロット</h1>
+    
+    <div class="stats">
+        <h3>📊 生成統計</h3>
+        <ul>
+            <li>総プロット数: 15</li>
+            <li>生成日時: 2025-07-05 15:00:54</li>
+            <li>目的: OHLCデータの目視確認・品質チェック</li>
+        </ul>
+    </div>
+
+    <div class="tf-section">
+        <h2>📈 M5 Time Frame</h2>
+        <div class="plot-grid">
+
+            <div class="plot-item">
+                <h4>Sample #1</h4>
+                <img src="m5_sample_1.png" alt="M5 Sample 1">
+                <p><strong>ファイル:</strong> m5_sample_1.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #2</h4>
+                <img src="m5_sample_2.png" alt="M5 Sample 2">
+                <p><strong>ファイル:</strong> m5_sample_2.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #3</h4>
+                <img src="m5_sample_3.png" alt="M5 Sample 3">
+                <p><strong>ファイル:</strong> m5_sample_3.png</p>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="tf-section">
+        <h2>📈 M15 Time Frame</h2>
+        <div class="plot-grid">
+
+            <div class="plot-item">
+                <h4>Sample #1</h4>
+                <img src="m15_sample_1.png" alt="M15 Sample 1">
+                <p><strong>ファイル:</strong> m15_sample_1.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #2</h4>
+                <img src="m15_sample_2.png" alt="M15 Sample 2">
+                <p><strong>ファイル:</strong> m15_sample_2.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #3</h4>
+                <img src="m15_sample_3.png" alt="M15 Sample 3">
+                <p><strong>ファイル:</strong> m15_sample_3.png</p>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="tf-section">
+        <h2>📈 H1 Time Frame</h2>
+        <div class="plot-grid">
+
+            <div class="plot-item">
+                <h4>Sample #1</h4>
+                <img src="h1_sample_1.png" alt="H1 Sample 1">
+                <p><strong>ファイル:</strong> h1_sample_1.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #2</h4>
+                <img src="h1_sample_2.png" alt="H1 Sample 2">
+                <p><strong>ファイル:</strong> h1_sample_2.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #3</h4>
+                <img src="h1_sample_3.png" alt="H1 Sample 3">
+                <p><strong>ファイル:</strong> h1_sample_3.png</p>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="tf-section">
+        <h2>📈 H4 Time Frame</h2>
+        <div class="plot-grid">
+
+            <div class="plot-item">
+                <h4>Sample #1</h4>
+                <img src="h4_sample_1.png" alt="H4 Sample 1">
+                <p><strong>ファイル:</strong> h4_sample_1.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #2</h4>
+                <img src="h4_sample_2.png" alt="H4 Sample 2">
+                <p><strong>ファイル:</strong> h4_sample_2.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #3</h4>
+                <img src="h4_sample_3.png" alt="H4 Sample 3">
+                <p><strong>ファイル:</strong> h4_sample_3.png</p>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="tf-section">
+        <h2>📈 D Time Frame</h2>
+        <div class="plot-grid">
+
+            <div class="plot-item">
+                <h4>Sample #1</h4>
+                <img src="d_sample_1.png" alt="D Sample 1">
+                <p><strong>ファイル:</strong> d_sample_1.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #2</h4>
+                <img src="d_sample_2.png" alt="D Sample 2">
+                <p><strong>ファイル:</strong> d_sample_2.png</p>
+            </div>
+
+            <div class="plot-item">
+                <h4>Sample #3</h4>
+                <img src="d_sample_3.png" alt="D Sample 3">
+                <p><strong>ファイル:</strong> d_sample_3.png</p>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="stats">
+        <h3>🔍 確認ポイント</h3>
+        <ul>
+            <li>OHLC価格の論理的整合性（Low ≤ Open,Close ≤ High）</li>
+            <li>価格の連続性と自然な変動</li>
+            <li>異常値やスパイクの有無</li>
+            <li>時系列の一貫性</li>
+        </ul>
+    </div>
+    
+</body>
+</html>

@@ -1,0 +1,36 @@
+# 除外対象（具体的に指定）
+
+# 仮想環境フォルダ（巨大）
+stage1/stage1_env/
+
+# チェックポイントフォルダ（巨大）
+stage1/checkpoints/
+
+# 古いファイルフォルダ（不要）
+old/
+
+# 大容量データベースファイル（715MB）
+data/oanda_historical.db
+
+# Cache files
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.coverage
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp

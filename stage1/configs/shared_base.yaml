@@ -1,0 +1,118 @@
+# 共通ベース設定 - BaselineとT5実験で統一パラメータ
+# seq_len=128、loss weightsを統一して純粋比較
+
+# データ設定
+data:
+  seq_len: 128  # 統一シーケンス長
+  n_timeframes: 6                 # TF数 (M1, M5, M15, M30, H1, H4)
+  n_features: 6                   # 特徴量数 [open, high, low, close, Δclose, %body]
+  total_channels: 36              # 6特徴量 × 6TF = 36チャンネル
+  timeframes:
+    - m1
+    - m5  
+    - m15
+    - m30
+    - h1
+    - h4
+  data_dir: "../data/derived"
+  stats_file: "stats.json"
+
+# モデル共通設定
+model:
+  d_model: 512
+  n_heads: 8
+  n_layers: 6
+  dropout: 0.1
+  
+# 学習設定
+training:
+  batch_size: 32              # バランスモード：適度な学習速度
+  learning_rate: 1e-3
+  weight_decay: 1e-4
+  warmup_epochs: 3            # 延長：2→3エポック
+  accumulate_grad_batches: 8
+  gradient_clip: 0.012        # 5倍データ対応で緩和（0.008→0.012）
+  precision: "32"             # NaN対策：AMP無効化、FP32固定
+  
+  # 統一されたオプティマイザー設定
+  optimizer:
+    name: "AdamW"
+    lr: 3.0e-5                        # ヘッド & Adapter 用の基準 LR（5倍データ対応で1.5倍）
+    betas: [0.9, 0.98]
+    weight_decay: 0.01
+    
+  # Layerwise LR Decay設定
+  layerwise_lr_decay: 0.90             # 下位層ほど LR を 0.90 倍ずつ減衰（緩和）
+  t5_lr_top: 7.5e-6                    # T5 エンコーダ最上層用 LR（5倍データ対応で1.5倍）
+    
+  # 統一されたLRスケジューラー設定
+  scheduler:
+    name: "linear_with_warmup"  # Linear Warmup + Cosine Decay
+    max_lr: 3.75e-5             # 最大学習率（5倍データ対応で1.5倍）
+    div_factor: 10.0            # OneCycleLR用（互換性保持）
+    final_div_factor: 50
+    pct_start: 0.10             
+    interval: "step"            # ステップ単位で更新
+
+# マスキング設定
+masking:
+  mask_ratio: 0.15
+  mask_span_min: 3
+  mask_span_max: 10
+  sync_across_tf: false          # H4問題回避のため各TF独立マスク
+
+# 正規化設定
+normalization:
+  method: "zscore"
+  per_tf: true
+
+# ロス設定（統一）
+loss:
+  weights:
+    recon_tf: 0.6
+    spec_tf: 0.02       # 1/10に削減（ダイナミックレンジ調整）
+    cross: 0.015        # 1/10に削減（ダイナミックレンジ調整）
+    amp_phase: 0.05
+  huber_delta: 1.0
+  stft_scales: [128, 256]
+
+# データ拡張（無効化）
+augmentation:
+  ddim_noise:
+    probability: 0.0
+  time_warp:
+    probability: 0.0
+  regime_mix:
+    probability: 0.0
+
+# 検証・メトリクス
+validation:
+  val_split: 0.2
+  metrics:
+    - "correlation_per_tf"
+    - "consistency_ratio"
+    - "spectral_delta"
+
+# ログ・チェックポイント（10エポック最適化）
+logging:
+  log_every_n_steps: 10
+  checkpoint_every_n_epochs: 1    # 毎エポック評価
+  save_top_k: 2                   # ベスト2のみ保存（ディスク節約）
+  monitor: "val_correlation_mean"
+  progress_bar_refresh_rate: 50
+
+# 実行設定
+runtime:
+  seed: 42
+
+# DataLoader設定（Bus error対策）
+dataloader:
+  num_workers: 4                  # 8から削減でメモリ節約
+  pin_memory: false               # Bus error回避
+  persistent_workers: false       # メモリ節約
+  prefetch_factor: 2              # 4から削減
+
+# 開発用設定
+development:
+  limit_train_batches: 200        # ライト版検証用
+  limit_val_batches: 40           # ライト版検証用

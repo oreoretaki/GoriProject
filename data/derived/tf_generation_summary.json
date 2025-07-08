@@ -1,0 +1,53 @@
+{
+  "generation_timestamp": "2025-07-05T15:13:39.278261",
+  "source_database": "data/oanda_historical.db",
+  "output_directory": "data/derived",
+  "generated_files": [
+    "data/derived/simple_gap_aware_m1.parquet",
+    "data/derived/simple_gap_aware_m5.parquet",
+    "data/derived/simple_gap_aware_m15.parquet",
+    "data/derived/simple_gap_aware_m30.parquet",
+    "data/derived/simple_gap_aware_h1.parquet",
+    "data/derived/simple_gap_aware_h4.parquet",
+    "data/derived/simple_gap_aware_d.parquet"
+  ],
+  "tf_configs": {
+    "m5": {
+      "rule": "5T",
+      "description": "5\u5206\u8db3"
+    },
+    "m15": {
+      "rule": "15T",
+      "description": "15\u5206\u8db3"
+    },
+    "m30": {
+      "rule": "30T",
+      "description": "30\u5206\u8db3"
+    },
+    "h1": {
+      "rule": "1H",
+      "description": "1\u6642\u9593\u8db3"
+    },
+    "h4": {
+      "rule": "4H",
+      "description": "4\u6642\u9593\u8db3"
+    },
+    "d": {
+      "rule": "1D",
+      "description": "\u65e5\u8db3"
+    }
+  },
+  "volume_policy": "EXCLUDED_COMPLETELY",
+  "gap_policy": "SIMPLE_DROPNA",
+  "timezone": "UTC_FIXED",
+  "resampling_params": {
+    "label": "left",
+    "closed": "left",
+    "agg_functions": {
+      "open": "first",
+      "high": "max",
+      "low": "min",
+      "close": "last"
+    }
+  }
+}

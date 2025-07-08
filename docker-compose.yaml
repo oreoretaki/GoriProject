@@ -1,0 +1,26 @@
+services:
+  goriproject:
+    build: .
+    image: goriproject:latest
+    container_name: goriproject_container
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - PL_DISABLE_FORK=1
+    volumes:
+      # データディレクトリをマウント（必要に応じて調整）
+      - ./data:/workspace/data
+      - ./logs:/workspace/logs
+      - ./checkpoints:/workspace/checkpoints
+    working_dir: /workspace/stage1
+    command: bash
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

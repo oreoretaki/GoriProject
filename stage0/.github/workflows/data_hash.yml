@@ -1,0 +1,134 @@
+name: Data Hash Integrity Check
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'data/derived/**'
+      - 'reports/hash_manifest.json'
+      - 'scripts/run_validate.py'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'data/derived/**'
+      - 'reports/hash_manifest.json'
+      - 'scripts/run_validate.py'
+
+jobs:
+  data-integrity-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas pyarrow
+        
+    - name: Check hash manifest exists
+      run: |
+        if [ ! -f "reports/hash_manifest.json" ]; then
+          echo "❌ reports/hash_manifest.json が見つかりません"
+          exit 1
+        fi
+        echo "✅ reports/hash_manifest.json 確認完了"
+        
+    - name: Verify data file integrity
+      run: |
+        python3 -c "
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+def calculate_md5(file_path):
+    hash_md5 = hashlib.md5()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b''):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+# マニフェスト読み込み
+with open('reports/hash_manifest.json') as f:
+    manifest = json.load(f)
+
+print('🔍 データファイル整合性検証開始')
+print('=' * 40)
+
+all_passed = True
+
+for file_path, expected in manifest['files'].items():
+    path_obj = Path(file_path)
+    
+    if not path_obj.exists():
+        print(f'❌ {file_path}: ファイルが見つかりません')
+        all_passed = False
+        continue
+    
+    actual_hash = calculate_md5(path_obj)
+    expected_hash = expected['md5']
+    
+    if actual_hash == expected_hash:
+        print(f'✅ {file_path}: OK ({actual_hash[:8]}...)')
+    else:
+        print(f'❌ {file_path}: ハッシュ不一致')
+        print(f'   期待値: {expected_hash}')
+        print(f'   実際値: {actual_hash}')
+        all_passed = False
+
+if all_passed:
+    print()
+    print('🎯 全ファイル検証合格')
+    print('データ整合性: ✅ OK')
+else:
+    print()
+    print('🚨 ファイル整合性エラーが検出されました')
+    sys.exit(1)
+        "
+        
+    - name: Run Stage 0 validation tests
+      run: |
+        python3 scripts/run_validate.py
+        
+    - name: Run boundary unit tests
+      run: |
+        python3 tests/test_boundary.py
+        
+    - name: Check file permissions and structure
+      run: |
+        echo "📁 ファイル構造確認:"
+        ls -la data/derived/
+        echo ""
+        echo "📊 ファイルサイズ確認:"
+        du -sh data/derived/*
+        
+    - name: Generate integrity report
+      run: |
+        echo "# Stage 0 データ整合性レポート" > integrity_report.md
+        echo "" >> integrity_report.md
+        echo "**生成日時**: $(date)" >> integrity_report.md
+        echo "**コミット**: ${{ github.sha }}" >> integrity_report.md
+        echo "" >> integrity_report.md
+        echo "## 検証結果" >> integrity_report.md
+        echo "- ✅ ハッシュ検証: 合格" >> integrity_report.md
+        echo "- ✅ Stage 0テスト: 合格" >> integrity_report.md
+        echo "- ✅ 境界テスト: 合格" >> integrity_report.md
+        echo "" >> integrity_report.md
+        echo "## ファイル一覧" >> integrity_report.md
+        echo "\`\`\`" >> integrity_report.md
+        ls -la data/derived/ >> integrity_report.md
+        echo "\`\`\`" >> integrity_report.md
+        
+    - name: Upload integrity report
+      uses: actions/upload-artifact@v3
+      with:
+        name: stage0-integrity-report
+        path: integrity_report.md
+        retention-days: 30

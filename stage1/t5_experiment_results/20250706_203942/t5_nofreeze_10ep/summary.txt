@@ -1,0 +1,11 @@
+実験: T5凍結なし(10ep)
+設定: t5_nofreeze_10ep.yaml
+ステータス: SUCCESS
+実行時間: 1061秒
+
+最終メトリクス:
+                                                                        [AEpoch 7: 100%|██████████| 100/100 [01:50<00:00,  0.90it/s, val_loss_ep=2576.1560, val_loss=2578.5591, val_corr_ep=-0.016, val_corr=+0.046, lr=1.09e-04]Epoch 7: 100%|██████████| 100/100 [01:50<00:00,  0.90it/s, val_loss_ep=2576.1560, val_loss=2578.5591, val_corr_ep=-0.016, val_corr=+0.046, lr=1.09e-04]Epoch 7: 100%|██████████| 100/100 [01:51<00:00,  0.89it/s, val_loss_ep=2576.1560, val_loss=2578.5591, val_corr_ep=-0.016, val_corr=+0.046, lr=1.09e-04]Using 16bit Automatic Mixed Precision (AMP)
+   最良チェックポイント: /mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/checkpoints/stage1-epoch=04-val_correlation_mean=-0.0104.ckpt
+     val_correlation       -0.02092820033431053
+  val_correlation_mean     -0.02092820033431053
+        val_loss              2576.169921875

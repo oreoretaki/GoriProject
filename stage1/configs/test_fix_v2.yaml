@@ -1,0 +1,60 @@
+# 修正テスト用 - t5_nofreeze_10ep.yamlベース、データ量のみ削減
+extends: shared_base.yaml
+
+# T5転移学習設定（v50と同じ）
+transfer_learning:
+  use_pretrained_lm: true
+  lm_name_or_path: "t5-base"
+  freeze_lm_epochs: 0
+  patch_len: 32
+  lm_learning_rate_factor: 0.01
+
+# モデルアーキテクチャ（T5統合）
+model:
+  tf_stem:
+    kernel_size: 3
+    d_model: 64
+    
+  encoder:
+    n_layers: 4
+    d_model: 64
+    d_state: 8
+    d_conv: 4
+    expand: 2
+    cross_attn_every: 2
+    flash_attn: true
+    
+  bottleneck:
+    latent_len: 16
+    stride: 8
+    
+  decoder:
+    n_layers: 2
+    kernel_size: 3
+    
+  positional:
+    intra_tf: "rotary"
+    inter_tf: "learned"
+
+# Warmup切り替えテスト用設定
+training:
+  epochs: 4                       # 4エポック（Warmup切り替えを含む）
+  accumulate_grad_batches: 8
+  early_stop:
+    patience: 3
+    min_delta: 0.001
+  precision: "16-mixed"
+
+# データ量を削減してテスト
+development:
+  limit_train_batches: 100        # 100バッチ（Warmup切り替えポイントを通過）
+  limit_val_batches: 20           # 20バッチ
+
+# 実行設定
+runtime:
+  seed: 42
+  experiment_name: "test_fix_v2"
+  
+# DataLoader設定
+dataloader:
+  num_workers: 1                  # 最小限

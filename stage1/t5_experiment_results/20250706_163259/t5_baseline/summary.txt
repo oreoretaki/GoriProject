@@ -1,0 +1,10 @@
+実験: ベースライン(ランダム初期化)
+設定: t5_baseline.yaml
+実行時間: 1542秒
+
+最終メトリクス:
+                                                                        [AEpoch 9: 100%|██████████| 100/100 [01:59<00:00,  0.84it/s, val_loss_ep=92.4833, val_loss=79.7520, val_corr_ep=-0.080, val_corr=-0.127, lr=5.44e-04, grad_norm=4.18e+04, amp=0]Epoch 9: 100%|██████████| 100/100 [01:59<00:00,  0.84it/s, val_loss_ep=92.4833, val_loss=79.7520, val_corr_ep=-0.080, val_corr=-0.127, lr=5.44e-04, grad_norm=4.18e+04, amp=0]Epoch 9: 100%|██████████| 100/100 [01:59<00:00,  0.84it/s, val_loss_ep=92.4833, val_loss=79.7520, val_corr_ep=-0.080, val_corr=-0.127, lr=5.44e-04, grad_norm=4.18e+04, amp=0]Using 16bit Automatic Mixed Precision (AMP)
+   最良チェックポイント: /mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/checkpoints/stage1-epoch=06-val_correlation_mean=-0.0604.ckpt
+     val_correlation       -0.09060180187225342
+  val_correlation_mean     -0.09060180187225342
+        val_loss             92.57075500488281

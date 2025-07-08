@@ -1,0 +1,19 @@
+{
+  "total_records": 3104383,
+  "real_data_records": 3104383,
+  "gap_records": 0,
+  "gap_ratio": 0.0,
+  "approach": "simple_no_gap_filling",
+  "start_time": "2017-01-03 08:00:00+00:00",
+  "end_time": "2025-06-17 23:24:00+00:00",
+  "file_size_bytes": 47009413,
+  "columns": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "gap_flag",
+    "timestamp"
+  ],
+  "timezone": "UTC"
+}

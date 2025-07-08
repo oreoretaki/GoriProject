@@ -1,0 +1,67 @@
+{
+  "manifest_version": "1.0.0",
+  "generated_at": "2025-07-05T14:56:00.082372",
+  "description": "Stage 0 \u30c7\u30fc\u30bf\u30d5\u30a1\u30a4\u30eb\u306eMD5\u30cf\u30c3\u30b7\u30e5\u30de\u30cb\u30d5\u30a7\u30b9\u30c8",
+  "files": {
+    "data/derived/simple_gap_aware_m1.parquet": {
+      "md5": "becc1aa344b372b38478ba39fd8138e0",
+      "size_bytes": 47009413,
+      "size_mb": 44.83,
+      "last_modified": 1751694418.2779708
+    },
+    "data/derived/simple_gap_aware_m5.parquet": {
+      "md5": "995a5d23c0603c6324c0167160b0e483",
+      "size_bytes": 10663083,
+      "size_mb": 10.17,
+      "last_modified": 1751692883.888947
+    },
+    "data/derived/simple_gap_aware_m15.parquet": {
+      "md5": "d2f47b20ac9cf63ff4b9228e120438f2",
+      "size_bytes": 4262091,
+      "size_mb": 4.06,
+      "last_modified": 1751692884.0279584
+    },
+    "data/derived/simple_gap_aware_m30.parquet": {
+      "md5": "8aae582a196f0a89170e9ad9cd4444c7",
+      "size_bytes": 2426956,
+      "size_mb": 2.31,
+      "last_modified": 1751692884.1426067
+    },
+    "data/derived/simple_gap_aware_h1.parquet": {
+      "md5": "b81ee065ed42a11aa298400a340091a8",
+      "size_bytes": 1315596,
+      "size_mb": 1.25,
+      "last_modified": 1751692884.2322204
+    },
+    "data/derived/simple_gap_aware_h4.parquet": {
+      "md5": "e294fe55e53861d03eac48080c968594",
+      "size_bytes": 405588,
+      "size_mb": 0.39,
+      "last_modified": 1751692884.3051753
+    },
+    "data/derived/simple_gap_aware_d.parquet": {
+      "md5": "35c9d9a561cdea1e2da26c59639e87ad",
+      "size_bytes": 90447,
+      "size_mb": 0.09,
+      "last_modified": 1751692884.3738964
+    },
+    "data/derived/full_consistency_report.json": {
+      "md5": "eefdb9fefa656c6a2482a81dbfa07f0b",
+      "size_bytes": 3072,
+      "size_mb": 0.0,
+      "last_modified": 1751692964.3125827
+    },
+    "gap_stats.json": {
+      "md5": "b3fc362bd67d052d0ee0ac71273b9686",
+      "size_bytes": 404,
+      "size_mb": 0.0,
+      "last_modified": 1751694618.9367206
+    }
+  },
+  "summary": {
+    "total_files": 9,
+    "total_size_bytes": 66176650,
+    "total_size_mb": 63.11,
+    "missing_files": 0
+  }
+}

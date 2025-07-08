@@ -1,0 +1,42 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 19, in <module>
+    import pytorch_lightning as pl
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/__init__.py", line 25, in <module>
+    from lightning_fabric.utilities.seed import seed_everything  # noqa: E402
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_fabric/__init__.py", line 35, in <module>
+    from lightning_fabric.fabric import Fabric  # noqa: E402
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_fabric/fabric.py", line 38, in <module>
+    from lightning_fabric.accelerators.accelerator import Accelerator
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_fabric/accelerators/__init__.py", line 15, in <module>
+    from lightning_fabric.accelerators.accelerator import Accelerator
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_fabric/accelerators/accelerator.py", line 19, in <module>
+    from lightning_fabric.accelerators.registry import _AcceleratorRegistry
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_fabric/accelerators/registry.py", line 18, in <module>
+    from lightning_fabric.utilities.exceptions import MisconfigurationException
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_fabric/utilities/__init__.py", line 16, in <module>
+    from lightning_fabric.utilities.apply_func import move_data_to_device
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_fabric/utilities/apply_func.py", line 44, in <module>
+    if _NUMPY_AVAILABLE:
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_utilities/core/imports.py", line 198, in __bool__
+    self._check_available()
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_utilities/core/imports.py", line 164, in _check_available
+    self._check_requirement()
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/lightning_utilities/core/imports.py", line 130, in _check_requirement
+    pkg_version = Version(_version(req.name))
+  File "/usr/lib/python3.10/importlib/metadata/__init__.py", line 996, in version
+    return distribution(distribution_name).version
+  File "/usr/lib/python3.10/importlib/metadata/__init__.py", line 627, in version
+    return self.metadata['Version']
+  File "/usr/lib/python3.10/importlib/metadata/__init__.py", line 612, in metadata
+    return _adapters.Message(email.message_from_string(text))
+  File "/usr/lib/python3.10/email/__init__.py", line 38, in message_from_string
+    return Parser(*args, **kws).parsestr(s)
+  File "/usr/lib/python3.10/email/parser.py", line 67, in parsestr
+    return self.parse(StringIO(text), headersonly=headersonly)
+  File "/usr/lib/python3.10/email/parser.py", line 56, in parse
+    feedparser.feed(data)
+  File "/usr/lib/python3.10/email/feedparser.py", line 175, in feed
+    self._input.push(data)
+  File "/usr/lib/python3.10/email/feedparser.py", line 103, in push
+    self._partial.write(data)
+KeyboardInterrupt

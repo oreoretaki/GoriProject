@@ -1,0 +1,160 @@
+[rank: 0] Seed set to 42
+Using 16bit Automatic Mixed Precision (AMP)
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loading `train_dataloader` to estimate number of stepping batches.
+🚀 Stage 1 訓練開始
+   設定ファイル: configs/t5_freeze_10ep.yaml
+   データディレクトリ: ../data/derived
+   デバイス数: 1
+📊 データローダー作成中...
+🔄 Stage 1 Dataset初期化 (train)
+   データディレクトリ: ../data/derived
+   時間足: ['m1', 'm5', 'm15', 'm30', 'h1', 'h4']
+   シーケンス長: 128
+   M1: 3,104,383レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:24:00+00:00
+   M5: 630,474レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:20:00+00:00
+   M15: 210,477レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:15:00+00:00
+   M30: 105,252レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:00:00+00:00
+   H1: 52,632レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:00:00+00:00
+   H4: 13,601レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 20:00:00+00:00
+🔧 FeatureEngineer初期化
+   特徴量数: 6
+   特徴量: ['open', 'high', 'low', 'close', 'delta_close', 'body_ratio']
+📏 TFNormalizer初期化
+   統計ファイル: ../data/derived/stats.json
+   キャッシュ有効: True
+📂 正規化統計ロード完了: 2個のTF
+🔄 MultiTFWindowSampler初期化 (train)
+   📂 キャッシュからウィンドウ読み込み: windows_d4ec0e80.npy
+   ⚡ ウィンドウ処理時間: 22.91秒
+   総ウィンドウ数: 3104256
+   trainウィンドウ数: 2483405
+🎭 MaskingStrategy初期化
+   マスク率: 0.15
+   スパン範囲: 3-10
+   TF間同期: True
+🔄 Stage 1 Dataset初期化 (val)
+   データディレクトリ: ../data/derived
+   時間足: ['m1', 'm5', 'm15', 'm30', 'h1', 'h4']
+   シーケンス長: 128
+   M1: 3,104,383レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:24:00+00:00
+   M5: 630,474レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:20:00+00:00
+   M15: 210,477レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:15:00+00:00
+   M30: 105,252レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:00:00+00:00
+   H1: 52,632レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 23:00:00+00:00
+   H4: 13,601レコード, 期間: 2017-01-03 08:00:00+00:00 - 2025-06-17 20:00:00+00:00
+🔧 FeatureEngineer初期化
+   特徴量数: 6
+   特徴量: ['open', 'high', 'low', 'close', 'delta_close', 'body_ratio']
+📏 TFNormalizer初期化
+   統計ファイル: ../data/derived/stats.json
+   キャッシュ有効: True
+📂 正規化統計ロード完了: 2個のTF
+🔄 MultiTFWindowSampler初期化 (val)
+   📂 キャッシュからウィンドウ読み込み: windows_d4ec0e80.npy
+   ⚡ ウィンドウ処理時間: 21.55秒
+   総ウィンドウ数: 3104256
+   valウィンドウ数: 620851
+🎭 MaskingStrategy初期化
+   マスク率: 0.15
+   スパン範囲: 3-10
+   TF間同期: True
+📊 DataLoader作成完了
+   訓練: 77606バッチ (2483405サンプル)
+   検証: 19401バッチ (620851サンプル)
+   最適化: num_workers=3, prefetch=4
+🧠 モデル初期化中...
+🤗 T5転移学習を使用します
+🤗 T5エンコーダーをロード中: t5-small
+🔒 T5エンコーダーを凍結しました
+✅ T5TimeSeriesAdapter初期化完了
+   T5 d_model: 512
+   Stage-1 d_model: 64
+   Patch length: 32
+   初期凍結エポック数: 2
+🎯 Stage1CombinedLoss初期化
+   損失重み: {'recon_tf': 0.6, 'spec_tf': 0.2, 'cross': 0.15, 'amp_phase': 0.05}
+⚡ Stage1LightningModule初期化完了
+   モデル情報: {'total_parameters': 36763560, 'trainable_parameters': 1432744, 'model_size_mb': 140.24185180664062, 'architecture': {'n_tf': 6, 'seq_len': 128, 'n_features': 6, 'd_model': 64, 'latent_len': 'dynamic(16)'}}
+🤗 T5段階的解凍コールバックを追加 (freeze_epochs=2)
+🤗 T5差分学習率を適用: base_lr=1.00e-03, t5_lr=1.00e-05
+
+  | Name      | Type               | Params | Mode 
+---------------------------------------------------------
+0 | model     | Stage1Model        | 36.8 M | train
+1 | criterion | Stage1CombinedLoss | 0      | train
+---------------------------------------------------------
+1.4 M     Trainable params
+35.3 M    Non-trainable params
+36.8 M    Total params
+147.054   Total estimated model params size (MB)
+102       Modules in train mode
+115       Modules in eval mode
+Sanity Checking: |          | 0/? [00:00<?, ?it/s]Sanity Checking:   0%|          | 0/2 [00:00<?, ?it/s]Sanity Checking DataLoader 0:   0%|          | 0/2 [00:00<?, ?it/s]Sanity Checking DataLoader 0: 100%|██████████| 2/2 [00:03<00:00,  0.55it/s]                                                                           Training: |          | 0/? [00:00<?, ?it/s]Training:   0%|          | 0/100 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/100 [00:00<?, ?it/s] Traceback (most recent call last):
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 632, in <module>
+    main()
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 611, in main
+    trainer.fit(model, train_loader, val_loader)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 561, in fit
+    call._call_and_handle_interrupt(
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/call.py", line 48, in _call_and_handle_interrupt
+    return trainer_fn(*args, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 599, in _fit_impl
+    self._run(model, ckpt_path=ckpt_path)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 1012, in _run
+    results = self._run_stage()
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py", line 1056, in _run_stage
+    self.fit_loop.run()
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/fit_loop.py", line 216, in run
+    self.advance()
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/fit_loop.py", line 455, in advance
+    self.epoch_loop.run(self._data_fetcher)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 152, in run
+    self.advance(data_fetcher)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 344, in advance
+    batch_output = self.automatic_optimization.run(trainer.optimizers[0], batch_idx, kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 192, in run
+    self._optimizer_step(batch_idx, closure)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 270, in _optimizer_step
+    call._call_lightning_module_hook(
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
+    output = fn(*args, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 207, in optimizer_step
+    return super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/core/module.py", line 1328, in optimizer_step
+    optimizer.step(closure=optimizer_closure)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/core/optimizer.py", line 154, in step
+    step_output = self._strategy.optimizer_step(self._optimizer, closure, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/strategies/strategy.py", line 239, in optimizer_step
+    return self.precision_plugin.optimizer_step(optimizer, model=model, closure=closure, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/plugins/precision/amp.py", line 79, in optimizer_step
+    closure_result = closure()
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 146, in __call__
+    self._result = self.closure(*args, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 140, in closure
+    self._backward_fn(step_output.closure_loss)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 241, in backward_fn
+    call._call_strategy_hook(self.trainer, "backward", loss, optimizer)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/call.py", line 328, in _call_strategy_hook
+    output = fn(*args, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/strategies/strategy.py", line 215, in backward
+    closure_loss = self.precision_plugin.post_backward(closure_loss, self.lightning_module)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/plugins/precision/precision.py", line 81, in post_backward
+    call._call_lightning_module_hook(trainer, "on_after_backward")
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/trainer/call.py", line 176, in _call_lightning_module_hook
+    output = fn(*args, **kwargs)
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 313, in on_after_backward
+    self.trainer.logger.experiment.add_histogram(
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torch/utils/tensorboard/writer.py", line 499, in add_histogram
+    histogram(tag, values, bins, max_bins=max_bins), global_step, walltime
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torch/utils/tensorboard/summary.py", line 485, in histogram
+    hist = make_histogram(values.astype(float), bins, max_bins)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torch/utils/tensorboard/summary.py", line 530, in make_histogram
+    raise ValueError("The histogram is empty, please file a bug report.")
+ValueError: The histogram is empty, please file a bug report.
+Epoch 0:   0%|          | 0/100 [00:05<?, ?it/s]

@@ -1,0 +1,104 @@
+data:
+  seq_len: 64
+  n_timeframes: 6
+  n_features: 6
+  total_channels: 36
+  timeframes:
+  - m1
+  - m5
+  - m15
+  - m30
+  - h1
+  - h4
+  data_dir: ../data/derived
+  stats_file: stats.json
+masking:
+  mask_ratio: 0.15
+  mask_span_min: 3
+  mask_span_max: 10
+  sync_across_tf: true
+normalization:
+  method: zscore
+  per_tf: true
+model:
+  tf_stem:
+    kernel_size: 3
+    d_model: 64
+  encoder:
+    n_layers: 4
+    d_model: 64
+    d_state: 8
+    d_conv: 4
+    expand: 2
+    cross_attn_every: 2
+    flash_attn: true
+  bottleneck:
+    latent_len: 12
+    stride: 4
+  decoder:
+    n_layers: 2
+    kernel_size: 3
+  positional:
+    intra_tf: rotary
+    inter_tf: learned
+loss:
+  weights:
+    recon_tf: 0.6
+    spec_tf: 0.2
+    cross: 0.15
+    amp_phase: 0.05
+  huber_delta: 1.0
+  stft_scales:
+  - 128
+  - 256
+training:
+  batch_size: 64
+  epochs: 5
+  early_stop:
+    patience: 3
+    min_delta: 0.001
+  optimizer:
+    name: AdamW
+    betas:
+    - 0.9
+    - 0.98
+    weight_decay: 0.01
+  scheduler:
+    name: OneCycleLR
+    max_lr: 0.001
+    div_factor: 3.33
+    final_div_factor: 50
+    pct_start: 0.05
+    interval: step
+  precision: 16-mixed
+  gradient_clip: 1.0
+  accumulate_grad_batches: 2
+augmentation:
+  ddim_noise:
+    probability: 0.0
+  time_warp:
+    probability: 0.0
+  regime_mix:
+    probability: 0.0
+validation:
+  val_split: 0.2
+  metrics:
+  - correlation_per_tf
+  - consistency_ratio
+  - spectral_delta
+logging:
+  log_every_n_steps: 10
+  checkpoint_every_n_epochs: 1
+  save_top_k: 2
+  monitor: val_correlation_mean
+  progress_bar_refresh_rate: 50
+runtime:
+  seed: 42
+development:
+  limit_train_batches: 100
+  limit_val_batches: 20
+dataloader:
+  num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4

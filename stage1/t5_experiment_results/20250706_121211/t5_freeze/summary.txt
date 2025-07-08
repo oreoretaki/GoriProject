@@ -1,0 +1,10 @@
+実験: T5凍結3エポック
+設定: t5_freeze.yaml
+実行時間: 547秒
+
+最終メトリクス:
+                                                                        [AEpoch 3: 100%|██████████| 100/100 [01:45<00:00,  0.95it/s, val_loss_ep=273.5052, val_loss=277.9319, val_corr_ep=-0.071, val_corr=-0.230, lr=6.03e-05, grad_norm=7.88e+04, amp=0]Epoch 3: 100%|██████████| 100/100 [01:45<00:00,  0.95it/s, val_loss_ep=273.5052, val_loss=277.9319, val_corr_ep=-0.071, val_corr=-0.230, lr=6.03e-05, grad_norm=7.88e+04, amp=0]Epoch 3: 100%|██████████| 100/100 [01:47<00:00,  0.93it/s, val_loss_ep=273.5052, val_loss=277.9319, val_corr_ep=-0.071, val_corr=-0.230, lr=6.03e-05, grad_norm=7.88e+04, amp=0]Using 16bit Automatic Mixed Precision (AMP)
+   最良チェックポイント: /mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/checkpoints/stage1-epoch=00-val_correlation_mean=-0.0625.ckpt
+     val_correlation       -0.08378248661756516
+  val_correlation_mean     -0.08378248661756516
+        val_loss            273.47357177734375

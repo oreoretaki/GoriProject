@@ -1,0 +1,34 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/taki/Desktop/my-projects/GoriProject/stage1/scripts/train_stage1.py", line 19, in <module>
+    import pytorch_lightning as pl
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/__init__.py", line 27, in <module>
+    from pytorch_lightning.callbacks import Callback  # noqa: E402
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/callbacks/__init__.py", line 14, in <module>
+    from pytorch_lightning.callbacks.batch_size_finder import BatchSizeFinder
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/callbacks/batch_size_finder.py", line 26, in <module>
+    from pytorch_lightning.callbacks.callback import Callback
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/callbacks/callback.py", line 22, in <module>
+    from pytorch_lightning.utilities.types import STEP_OUTPUT
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/pytorch_lightning/utilities/types.py", line 36, in <module>
+    from torchmetrics import Metric
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torchmetrics/__init__.py", line 37, in <module>
+    from torchmetrics import functional  # noqa: E402
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torchmetrics/functional/__init__.py", line 128, in <module>
+    from torchmetrics.functional.text._deprecated import _bleu_score as bleu_score
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torchmetrics/functional/text/__init__.py", line 50, in <module>
+    from torchmetrics.functional.text.bert import bert_score
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/torchmetrics/functional/text/bert.py", line 56, in <module>
+    from transformers import AutoModel, AutoTokenizer
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/transformers/__init__.py", line 1022, in <module>
+    import_structure = define_import_structure(Path(__file__).parent / "models", prefix="models")
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/transformers/utils/import_utils.py", line 2703, in define_import_structure
+    import_structure = create_import_structure_from_path(module_path)
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/transformers/utils/import_utils.py", line 2416, in create_import_structure_from_path
+    import_structure[f] = create_import_structure_from_path(os.path.join(module_path, f))
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/transformers/utils/import_utils.py", line 2416, in create_import_structure_from_path
+    import_structure[f] = create_import_structure_from_path(os.path.join(module_path, f))
+  File "/mnt/c/Users/taki/Desktop/my-projects/OANDI/ts_transformer_rl/GORI/venv/lib/python3.10/site-packages/transformers/utils/import_utils.py", line 2440, in create_import_structure_from_path
+    with open(os.path.join(directory, module_name), encoding="utf-8") as f:
+  File "/usr/lib/python3.10/codecs.py", line 309, in __init__
+    def __init__(self, errors='strict'):
+KeyboardInterrupt

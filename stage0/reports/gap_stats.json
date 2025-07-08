@@ -1,0 +1,16 @@
+{
+  "gap_total": 1341822,
+  "gap_lt5m_filled": 0,
+  "gap_ge5m_kept": 1341822,
+  "gap_longest_h": 72.08333333333333,
+  "meta": {
+    "total_theoretical_records": 4446205,
+    "total_actual_records": 3104383,
+    "approach": "simple_no_gap_filling",
+    "analysis_date": "2025-07-05T14:50:19.021479",
+    "data_period": {
+      "start": "2017-01-03 08:00:00",
+      "end": "2025-06-17 23:24:00"
+    }
+  }
+}

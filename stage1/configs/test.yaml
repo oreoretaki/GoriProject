@@ -1,0 +1,143 @@
+# Stage 1 Test Configuration - 高速開発用
+# 元のbase.yamlから大幅に削減したテスト用設定
+
+# データ設定
+data:
+  seq_len: 64                     # 2の累乗に最適化（元: 48）
+  n_timeframes: 6                 # TF数 (M1, M5, M15, M30, H1, H4, D)
+  n_features: 6                   # 特徴量数 [open, high, low, close, Δclose, %body]
+  total_channels: 36              # 6特徴量 × 6TF = 36チャンネル
+  timeframes:
+    - m1
+    - m5  
+    - m15
+    - m30
+    - h1
+    - h4
+    # - d                         # テスト用にDを除外（高速化のため）
+  data_dir: "../data/derived"
+  stats_file: "stats.json"        # 正規化統計
+
+# マスキング設定
+masking:
+  mask_ratio: 0.15                # TFごとに15%のトークンをマスク
+  mask_span_min: 3                # 短縮（元: 5）
+  mask_span_max: 10               # 短縮（元: 60）
+  sync_across_tf: true            # TF間でマスキング同期
+
+# 正規化設定
+normalization:
+  method: "zscore"                # z-score正規化
+  per_tf: true                    # TFごとに個別統計
+
+# モデルアーキテクチャ
+model:
+  # TF固有ステム
+  tf_stem:
+    kernel_size: 3                # 1D depth-wise CNN
+    d_model: 64                   # 削減（元: 128）
+    
+  # クロススケールミキサー  
+  encoder:
+    n_layers: 4                   # 削減（元: 8）
+    d_model: 64                   # 削減（元: 128）
+    d_state: 8                    # 削減（元: 16）
+    d_conv: 4                     # 畳み込み次元
+    expand: 2                     # FFN拡張率
+    cross_attn_every: 2           # 2層ごとにクロススケール注意
+    flash_attn: true              # FlashAttention-2使用
+    
+  # Bottleneck
+  bottleneck:
+    latent_len: 12                # seq_len/4 = 48/4 = 12（動的計算）
+    stride: 4                     # ストライド畳み込み
+    
+  # デコーダー
+  decoder:
+    n_layers: 2                   # 削減（元: 4）
+    kernel_size: 3                # 転置畳み込み
+    
+  # 位置エンコーディング
+  positional:
+    intra_tf: "rotary"            # TF内: 学習済みRotary
+    inter_tf: "learned"           # TF間: 相対時間フレームID
+
+# 損失設定
+loss:
+  weights:
+    recon_tf: 0.6                 # Huber損失（TFごとのOHLC）
+    spec_tf: 0.2                  # マルチ解像度STFT損失
+    cross: 0.15                   # クロスTF整合性損失
+    amp_phase: 0.05               # 振幅・位相相関損失
+    
+  huber_delta: 1.0                # Huber損失のデルタ
+  stft_scales: [128, 256]         # 削減（元: [256, 512, 1024]）
+  
+# 訓練設定
+training:
+  batch_size: 64                  # 大幅増加で並列効率向上（元: 8）
+  epochs: 5                       # 削減（元: 40）
+  early_stop:
+    patience: 3                   # 削減（元: 5）
+    min_delta: 0.001              # Δcorr閾値
+    
+  # オプティマイザー
+  optimizer:
+    name: "AdamW"
+    betas: [0.9, 0.98]
+    weight_decay: 0.01
+    
+  # 学習率スケジューラー
+  scheduler:
+    name: "OneCycleLR"
+    max_lr: 1.0e-3                # 高め（元: 5.0e-4）
+    div_factor: 3.33              # 初期LR = max_lr/div_factor
+    final_div_factor: 50          # 最終LR = max_lr/final_div_factor
+    pct_start: 0.05               # 短縮（元: 0.3）
+    interval: "step"              # step単位で調整
+    
+  # 混合精度・勾配設定
+  precision: "16-mixed"           # Tensor Core最適化（元: 32）
+  gradient_clip: 1.0              # 勾配クリッピング
+  accumulate_grad_batches: 2      # 勾配累積で見かけbatch_size=128
+
+# データ拡張（無効化）
+augmentation:
+  ddim_noise:
+    probability: 0.0              # 無効化（元: 0.3）
+  time_warp:
+    probability: 0.0              # 無効化（元: 0.2）
+  regime_mix:
+    probability: 0.0              # 無効化（元: 0.1）
+    
+# 検証・メトリクス
+validation:
+  val_split: 0.2                  # 20%を検証用
+  metrics:
+    - "correlation_per_tf"        # TFごとの相関
+    - "consistency_ratio"         # 整合性比率
+    - "spectral_delta"            # スペクトラムΔ
+    
+# ログ・チェックポイント
+logging:
+  log_every_n_steps: 10           # ◆ 高頻度監視（5メトリクス用）
+  checkpoint_every_n_epochs: 1    # 毎エポック（元: 5）
+  save_top_k: 2                   # 削減（元: 3）
+  monitor: "val_correlation_mean"  # 監視メトリクス
+  progress_bar_refresh_rate: 50   # Progress bar更新頻度向上
+  
+# 実行設定
+runtime:
+  seed: 42
+  
+# 開発用設定
+development:
+  limit_train_batches: 100        # 訓練バッチを100に制限
+  limit_val_batches: 20           # 検証バッチを20に制限
+  
+# DataLoader最適化
+dataloader:
+  num_workers: 8                  # 大幅増加（元: 2）
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4              # プリフェッチ追加

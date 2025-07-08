@@ -1,0 +1,139 @@
+# Stage 1 Medium Configuration - 中規模学習用
+# test.yamlとproduction.yamlの中間設定
+
+# データ設定
+data:
+  seq_len: 96                     # 中間サイズ（test: 64, prod: 128）
+  n_timeframes: 6                 # D除外（test: 6, prod: 7）
+  n_features: 6                   # 特徴量数 [open, high, low, close, Δclose, %body]
+  total_channels: 36              # 6特徴量 × 6TF = 36チャンネル
+  timeframes:
+    - m1
+    - m5  
+    - m15
+    - m30
+    - h1
+    - h4
+    # - d                         # 中間では除外
+  data_dir: "../data/derived"
+  stats_file: "stats.json"        # 正規化統計
+
+# マスキング設定
+masking:
+  mask_ratio: 0.15                # TFごとに15%のトークンをマスク
+  mask_span_min: 4                # 中間値
+  mask_span_max: 24               # 中間値（seq_len/4）
+  sync_across_tf: true            # TF間でマスキング同期
+
+# 正規化設定
+normalization:
+  method: "zscore"                # z-score正規化
+  per_tf: true                    # TFごとに個別統計
+
+# モデルアーキテクチャ（中間）
+model:
+  # TF固有ステム
+  tf_stem:
+    kernel_size: 3                # 1D depth-wise CNN
+    d_model: 96                   # 中間容量（test: 64, prod: 128）
+    
+  # クロススケールミキサー  
+  encoder:
+    n_layers: 6                   # 中間深度（test: 4, prod: 8）
+    d_model: 96                   # 中間容量（test: 64, prod: 128）
+    d_state: 12                   # 中間状態次元（test: 8, prod: 16）
+    d_conv: 4                     # 畳み込み次元
+    expand: 2                     # FFN拡張率
+    cross_attn_every: 2           # 2層ごとにクロススケール注意
+    flash_attn: true              # FlashAttention-2使用
+    
+  # Bottleneck
+  bottleneck:
+    latent_len: 24                # seq_len/4 = 96/4 = 24（動的計算）
+    stride: 4                     # ストライド畳み込み
+    
+  # デコーダー
+  decoder:
+    n_layers: 3                   # 中間深度（test: 2, prod: 4）
+    kernel_size: 3                # 転置畳み込み
+    
+  # 位置エンコーディング
+  positional:
+    intra_tf: "rotary"            # TF内: 学習済みRotary
+    inter_tf: "learned"           # TF間: 相対時間フレームID
+
+# 損失設定
+loss:
+  weights:
+    recon_tf: 0.6                 # Huber損失（TFごとのOHLC）
+    spec_tf: 0.2                  # マルチ解像度STFT損失
+    cross: 0.15                   # クロスTF整合性損失
+    amp_phase: 0.05               # 振幅・位相相関損失
+    
+  huber_delta: 1.0                # Huber損失のデルタ
+  stft_scales: [256, 512]         # 中間解像度（test: [128, 256], prod: [256, 512, 1024]）
+  
+# 訓練設定（中間）
+training:
+  batch_size: 48                  # 中間サイズ（test: 64, prod: 32）
+  epochs: 15                      # 中間期間（test: 5, prod: 40）
+  early_stop:
+    patience: 5                   # 中間忍耐（test: 3, prod: 8）
+    min_delta: 0.0005             # 中間改善閾値
+    
+  # オプティマイザー
+  optimizer:
+    name: "AdamW"
+    betas: [0.9, 0.99]            # 中間版（test: [0.9, 0.98], prod: [0.9, 0.999]）
+    weight_decay: 0.01
+    
+  # 学習率スケジューラー
+  scheduler:
+    name: "OneCycleLR"
+    max_lr: 7.5e-4                # 中間学習率（test: 1.0e-3, prod: 5.0e-4）
+    div_factor: 6                 # 初期LR = max_lr/div_factor
+    final_div_factor: 75          # 最終LR = max_lr/final_div_factor
+    pct_start: 0.15               # 中間ウォームアップ（test: 0.05, prod: 0.3）
+    interval: "step"              # step単位で調整
+    
+  # 混合精度・勾配設定
+  precision: "16-mixed"           # Tensor Core最適化
+  gradient_clip: 1.0              # 勾配クリッピング
+  accumulate_grad_batches: 3      # 勾配累積で見かけbatch_size=144
+
+# データ拡張（無効化）
+augmentation:
+  ddim_noise:
+    probability: 0.0              # 無効化
+  time_warp:
+    probability: 0.0              # 無効化
+  regime_mix:
+    probability: 0.0              # 無効化
+    
+# 検証・メトリクス
+validation:
+  val_split: 0.2                  # 20%を検証用
+  metrics:
+    - "correlation_per_tf"        # TFごとの相関
+    - "consistency_ratio"         # 整合性比率
+    - "spectral_delta"            # スペクトラムΔ
+    
+# ログ・チェックポイント
+logging:
+  log_every_n_steps: 75           # 中間頻度（test: 100, prod: 50）
+  checkpoint_every_n_epochs: 2    # 中間保存（test: 1, prod: 2）
+  save_top_k: 3                   # 中間保存数（test: 2, prod: 5）
+  monitor: "val_correlation_mean"  # 監視メトリクス
+  progress_bar_refresh_rate: 50   # Progress bar更新頻度
+  
+# 実行設定
+runtime:
+  seed: 42
+  experiment_name: "medium_v1"    # 実験名
+  
+# DataLoader最適化（中間）
+dataloader:
+  num_workers: 4                  # メモリ節約のため削減（test: 8, prod: 12）
+  pin_memory: true
+  persistent_workers: false       # メモリリーク防止のため無効化
+  prefetch_factor: 2              # メモリ節約のため削減（test: 4, prod: 6）

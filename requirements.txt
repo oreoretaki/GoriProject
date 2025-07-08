@@ -1,0 +1,49 @@
+# Core ML Dependencies
+# PyTorch for CUDA 11.8
+--index-url https://download.pytorch.org/whl/cu118
+torch==2.4.1
+torchaudio==2.4.1
+torchvision==0.19.1
+
+# Reset index for other packages
+--index-url https://pypi.org/simple/
+pytorch-lightning==2.4.0
+transformers==4.53.1
+
+# Data Processing
+numpy==2.1.2
+pandas==2.3.0
+pyarrow>=12.0.0
+scipy==1.15.3
+scikit-learn
+
+# Visualization & Monitoring
+tensorboard==2.19.0
+matplotlib>=3.7.0
+tqdm
+
+# Configuration
+PyYAML==6.0.2
+omegaconf==2.3.0
+hydra-core>=1.3.0
+
+# Utilities
+psutil>=5.9.0
+einops
+rich
+
+# Testing
+pytest
+pytest-cov
+
+# Additional
+lightning-utilities==0.14.3
+torchmetrics==1.7.3
+tensorboard-data-server==0.7.2
+antlr4-python3-runtime==4.9.3
+filelock
+huggingface-hub
+tokenizers
+safetensors
+accelerate
+sentencepiece
