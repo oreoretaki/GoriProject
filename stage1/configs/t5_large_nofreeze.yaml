@@ -84,7 +84,7 @@ runtime:
   
 # DataLoader最適化（T5用）- shared_baseから継承されるが、T5用に調整
 dataloader:
-  num_workers: 3                  # T5メモリ負荷を考慮してさらに削減
+  num_workers: 18                 # 8→18に増加（CPUボトルネック完全解消）
 
 # 開発用設定（総データ量の10%程度）
 development:
