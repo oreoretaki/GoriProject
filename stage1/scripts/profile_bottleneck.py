@@ -148,7 +148,7 @@ def main():
     print("=" * 50)
     
     # 設定読み込み
-    config_path = "../configs/t5_large_nofreeze.yaml"
+    config_path = "configs/t5_large_nofreeze.yaml"
     config = load_config(config_path)
     config['data']['data_dir'] = "../data/derived"
     
