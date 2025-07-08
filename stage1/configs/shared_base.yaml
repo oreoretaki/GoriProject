@@ -37,18 +37,18 @@ training:
   # 統一されたオプティマイザー設定
   optimizer:
     name: "AdamW"
-    lr: 3.0e-5                        # ヘッド & Adapter 用の基準 LR（5倍データ対応で1.5倍）
+    lr: 5.8e-7                        # ヘッド & Adapter 用の基準 LR（LR Finder推奨値）
     betas: [0.9, 0.98]
     weight_decay: 0.01
     
   # Layerwise LR Decay設定
   layerwise_lr_decay: 0.90             # 下位層ほど LR を 0.90 倍ずつ減衰（緩和）
-  t5_lr_top: 7.5e-6                    # T5 エンコーダ最上層用 LR（5倍データ対応で1.5倍）
+  t5_lr_top: 1.4e-7                    # T5 エンコーダ最上層用 LR（LR Finder推奨値）
     
   # 統一されたLRスケジューラー設定
   scheduler:
     name: "linear_with_warmup"  # Linear Warmup + Cosine Decay
-    max_lr: 3.75e-5             # 最大学習率（5倍データ対応で1.5倍）
+    max_lr: 5.8e-7              # 最大学習率（LR Finder推奨値）
     div_factor: 10.0            # OneCycleLR用（互換性保持）
     final_div_factor: 50
     pct_start: 0.10             
