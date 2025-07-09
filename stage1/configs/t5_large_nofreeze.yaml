@@ -9,7 +9,7 @@ transfer_learning:
   use_pretrained_lm: true
   lm_name_or_path: "t5-large"           # 正式ID（約738M parameters）
   freeze_lm_epochs: 0                   # 最初から解凍 + Layerwise LR Decay
-  patch_len: 32                         # 128/32=4 patches
+  patch_len: 16                         # 128/16=8 patches (6*16=96次元)
   lm_learning_rate_factor: 0.01         # T5学習率を10倍に調整
 
 # データ設定は shared_base.yaml から継承
@@ -18,11 +18,11 @@ transfer_learning:
 model:
   tf_stem:
     kernel_size: 3
-    d_model: 64                   # T5出力をこの次元に投影
+    d_model: 1024                 # T5のd_modelに合わせる
     
   encoder:
     n_layers: 4                   # T5後の追加層数
-    d_model: 64                   # Stage-1の次元（T5から投影）
+    d_model: 1024                 # T5のd_modelに統一
     d_state: 8
     d_conv: 4
     expand: 2
