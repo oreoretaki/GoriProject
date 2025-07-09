@@ -35,13 +35,14 @@ class MaskingStrategy:
         # 乱数生成器（再現性のため）
         self.rng = np.random.RandomState()
         
-    def generate_masks(self, features: torch.Tensor, seed: int = None) -> torch.Tensor:
+    def generate_masks(self, features: torch.Tensor, seed: int = None, eval_mask_ratio_override: float = None) -> torch.Tensor:
         """
         マルチTF特徴量に対するマスクを生成
         
         Args:
             features: [n_tf, seq_len, n_features] 特徴量テンソル
             seed: ランダムシード（再現性用）
+            eval_mask_ratio_override: 評価時のマスク率上書き (None=通常, 0=マスクなし, 1=全マスク)
             
         Returns:
             masks: [n_tf, seq_len] マスクテンソル (1=マスク, 0=観測)
@@ -50,11 +51,17 @@ class MaskingStrategy:
             self.rng.seed(seed)
             
         n_tf, seq_len, n_features = features.shape
+        
+        # 評価時のマスク率オーバーライド処理
+        effective_mask_ratio = self.mask_ratio
+        if eval_mask_ratio_override is not None:
+            effective_mask_ratio = eval_mask_ratio_override
+            
         masks = torch.zeros(n_tf, seq_len)
         
         if self.sync_across_tf:
             # TF間同期マスキング: M1ベースでマスクを生成し、他のTFに適用
-            base_mask = self._generate_single_mask(seq_len)
+            base_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
             
             for i in range(n_tf):
                 # 各TFの実際の長さに応じてマスクを調整
@@ -63,25 +70,27 @@ class MaskingStrategy:
         else:
             # TF個別マスキング
             for i in range(n_tf):
-                tf_mask = self._generate_single_mask(seq_len)
+                tf_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
                 # 各TFの実際の長さに応じて調整
                 tf_mask = self._adapt_mask_to_tf(tf_mask, features[i], seq_len)
                 masks[i] = tf_mask
                 
         return masks
         
-    def _generate_single_mask(self, seq_len: int) -> torch.Tensor:
+    def _generate_single_mask(self, seq_len: int, mask_ratio: float = None) -> torch.Tensor:
         """
         単一シーケンスに対するマスクを生成
         
         Args:
             seq_len: シーケンス長
+            mask_ratio: マスク率（Noneの場合はself.mask_ratioを使用）
             
         Returns:
             mask: [seq_len] マスクテンソル
         """
         mask = torch.zeros(seq_len)
-        target_masked = int(seq_len * self.mask_ratio)
+        effective_mask_ratio = mask_ratio if mask_ratio is not None else self.mask_ratio
+        target_masked = int(seq_len * effective_mask_ratio)
         masked_count = 0
         
         # ランダム連続ブロックでマスキング

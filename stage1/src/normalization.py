@@ -30,6 +30,7 @@ class TFNormalizer:
         # 統計ファイルパス
         data_dir = Path(config['data']['data_dir'])
         self.stats_file = data_dir / config['data']['stats_file']
+        self.stats_train_file = data_dir / 'stats_train.json'  # train専用統計ファイル
         
         # 正規化統計 {tf: {'mean': [...], 'std': [...]}}
         self.stats = {}
@@ -123,6 +124,34 @@ class TFNormalizer:
             json.dump(stats_with_meta, f, indent=2)
             
         print(f"💾 正規化統計保存完了: {self.stats_file}")
+        
+    def save_stats(self, split: str = "all") -> None:
+        """
+        統計をファイルに保存（split指定可能）
+        
+        Args:
+            split: "all" (通常), "train" (train専用統計)
+        """
+        if split == "train":
+            # train専用統計を保存
+            stats_with_meta = {
+                'metadata': {
+                    'n_timeframes': len(self.timeframes),
+                    'n_features': self.n_features,
+                    'feature_names': self.feature_names,
+                    'normalization_method': 'zscore',
+                    'split': 'train_only'
+                },
+                'timeframes': self.stats
+            }
+            
+            with open(self.stats_train_file, 'w') as f:
+                json.dump(stats_with_meta, f, indent=2)
+                
+            print(f"💾 train専用統計保存完了: {self.stats_train_file}")
+        else:
+            # 通常の統計保存
+            self._save_stats()
         
     def normalize(self, features: torch.Tensor) -> torch.Tensor:
         """

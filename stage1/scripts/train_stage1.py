@@ -507,6 +507,9 @@ def main():
     parser.add_argument('--batch_size', type=int, default=None, help='バッチサイズ上書き')
     parser.add_argument('--gradient_clip_val', type=float, default=None, help='勾配クリッピング値上書き')
     parser.add_argument('--check_early_stop', action='store_true', help='早期停止動作テスト')
+    parser.add_argument('--val_gap_days', type=float, default=None, help='訓練と検証の間の時間的ギャップ（日数）')
+    parser.add_argument('--eval_mask_ratio', type=float, default=None, help='評価時のマスク率 (0=マスクなし, 1=全マスク)')
+    parser.add_argument('--seeds', type=int, nargs='+', default=None, help='複数シード実行 (例: --seeds 42 123 2025)')
     
     args = parser.parse_args()
     
@@ -521,6 +524,10 @@ def main():
         config['training']['batch_size'] = args.batch_size
     if args.gradient_clip_val:
         config['training']['gradient_clip'] = args.gradient_clip_val
+    if args.val_gap_days:
+        config['validation']['val_gap_days'] = args.val_gap_days
+    if args.eval_mask_ratio is not None:
+        config['evaluation']['eval_mask_ratio'] = args.eval_mask_ratio
     
     print("🚀 Stage 1 訓練開始")
     print(f"   設定ファイル: {args.config}")
@@ -768,17 +775,80 @@ def main():
         print("✅ ドライラン完了")
         return
     
-    # 訓練実行
-    if args.resume_from:
-        print(f"📂 チェックポイントから再開: {args.resume_from}")
-        trainer.fit(model, train_loader, val_loader, ckpt_path=args.resume_from)
+    # 複数シード実行
+    if args.seeds:
+        print(f"🎲 複数シード実行: {args.seeds}")
+        results = []
+        
+        for seed in args.seeds:
+            print(f"\n🎯 シード {seed} で実行中...")
+            
+            # シード設定
+            pl.seed_everything(seed)
+            
+            # 新しいモデルとトレーナーを作成
+            model = Stage1LightningModule(config)
+            trainer = pl.Trainer(
+                max_epochs=config['training']['epochs'],
+                devices=args.devices,
+                accelerator='gpu' if torch.cuda.is_available() else 'cpu',
+                callbacks=[checkpoint_callback, early_stopping_callback],
+                logger=tb_logger,
+                precision=config['training']['precision'],
+                gradient_clip_val=config['training']['gradient_clip'],
+                accumulate_grad_batches=config['training']['accumulate_grad_batches'],
+                profiler=args.profiler,
+                fast_dev_run=args.fast_dev_run,
+                enable_checkpointing=True,
+                strategy='auto',
+                log_every_n_steps=config['logging']['log_every_n_steps'],
+                enable_model_summary=False
+            )
+            
+            # 訓練実行
+            if args.resume_from:
+                trainer.fit(model, train_loader, val_loader, ckpt_path=args.resume_from)
+            else:
+                trainer.fit(model, train_loader, val_loader)
+                
+            # 結果記録
+            best_score = checkpoint_callback.best_model_score
+            results.append({
+                'seed': seed,
+                'best_score': best_score,
+                'best_checkpoint': checkpoint_callback.best_model_path
+            })
+            
+            print(f"   シード {seed} 完了 - スコア: {best_score}")
+        
+        # 複数シード結果の統計
+        scores = [r['best_score'] for r in results]
+        mean_score = np.mean(scores)
+        std_score = np.std(scores)
+        
+        print(f"\n📊 複数シード結果統計:")
+        print(f"   平均スコア: {mean_score:.6f}")
+        print(f"   標準偏差: {std_score:.6f}")
+        print(f"   最高スコア: {max(scores):.6f}")
+        print(f"   最低スコア: {min(scores):.6f}")
+        
+        # 詳細結果
+        print(f"\n📋 詳細結果:")
+        for r in results:
+            print(f"   シード {r['seed']}: {r['best_score']:.6f} ({r['best_checkpoint']})")
+            
     else:
-        trainer.fit(model, train_loader, val_loader)
-    
-    # 最良モデル情報
-    print("✅ 訓練完了")
-    print(f"   最良チェックポイント: {checkpoint_callback.best_model_path}")
-    print(f"   最良スコア: {checkpoint_callback.best_model_score}")
+        # 単一シード実行（従来の処理）
+        if args.resume_from:
+            print(f"📂 チェックポイントから再開: {args.resume_from}")
+            trainer.fit(model, train_loader, val_loader, ckpt_path=args.resume_from)
+        else:
+            trainer.fit(model, train_loader, val_loader)
+        
+        # 最良モデル情報
+        print("✅ 訓練完了")
+        print(f"   最良チェックポイント: {checkpoint_callback.best_model_path}")
+        print(f"   最良スコア: {checkpoint_callback.best_model_score}")
     
     # 最終評価（fast_dev_runでは省略）
     if not args.fast_dev_run:

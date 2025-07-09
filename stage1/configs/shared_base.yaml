@@ -88,10 +88,15 @@ augmentation:
 # 検証・メトリクス
 validation:
   val_split: 0.2
+  val_gap_days: 1.0              # 訓練と検証の間の時間的ギャップ（日数）
   metrics:
     - "correlation_per_tf"
     - "consistency_ratio"
     - "spectral_delta"
+
+# 評価設定
+evaluation:
+  eval_mask_ratio: null          # 評価時のマスク率 (null=通常, 0=マスクなし, 1=全マスク)
 
 # ログ・チェックポイント（10エポック最適化）
 logging:

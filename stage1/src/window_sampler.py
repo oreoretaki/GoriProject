@@ -24,7 +24,8 @@ class MultiTFWindowSampler:
         split: str = "train",
         val_split: float = 0.2,
         min_coverage: float = 0.8,
-        cache_dir: Optional[str] = None
+        cache_dir: Optional[str] = None,
+        val_gap_days: float = 1.0
     ):
         """
         Args:
@@ -33,6 +34,8 @@ class MultiTFWindowSampler:
             split: "train" or "val"
             val_split: 検証データ割合
             min_coverage: 最小データカバレッジ（全TFでデータが存在する割合）
+            cache_dir: キャッシュディレクトリ
+            val_gap_days: 訓練と検証の間の時間的ギャップ（日数）
         """
         self.tf_data = tf_data
         self.seq_len = seq_len
@@ -40,6 +43,7 @@ class MultiTFWindowSampler:
         self.val_split = val_split
         self.min_coverage = min_coverage
         self.cache_dir = Path(cache_dir) if cache_dir else Path("./cache")
+        self.val_gap_days = val_gap_days
         
         # M1をベースとして使用
         self.base_tf = 'm1'
@@ -240,16 +244,24 @@ class MultiTFWindowSampler:
         return max(1, expected_len)  # 最低1データポイント
         
     def _split_windows(self) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
-        """訓練/検証分割"""
+        """訓練/検証分割（時間的ギャップ付き）"""
         
         n_total = len(self.valid_windows)
         n_val = int(n_total * self.val_split)
         
-        # 時系列データなので、最後の部分を検証用に
+        # val_gap_days を分単位に変換
+        val_gap_minutes = int(self.val_gap_days * 24 * 60)
+        
+        if n_val == 0:
+            return self.valid_windows if self.split == "train" else []
+            
+        # ギャップを考慮した分割
         if self.split == "train":
-            return self.valid_windows[:-n_val] if n_val > 0 else self.valid_windows
+            # 訓練: 最後の (n_val + gap) を除外
+            return self.valid_windows[:-(n_val + val_gap_minutes)]
         else:  # val
-            return self.valid_windows[-n_val:] if n_val > 0 else []
+            # 検証: 最後の n_val のみ使用（gapの後から）
+            return self.valid_windows[-n_val:]
             
     def __len__(self) -> int:
         """サンプル数"""

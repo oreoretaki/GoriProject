@@ -58,7 +58,8 @@ class Stage1Dataset(Dataset):
             split=split,
             val_split=config['validation']['val_split'],
             min_coverage=0.8,
-            cache_dir=str(cache_dir)
+            cache_dir=str(cache_dir),
+            val_gap_days=config['validation'].get('val_gap_days', 1.0)
         )
         
         # マスキング戦略
