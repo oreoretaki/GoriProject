@@ -544,18 +544,22 @@ def main():
             if torch.cuda.is_available():
                 model = model.cuda()
             
-            # 事前ウォームアップでコンパイル時間を隠蔽
+            # 1) コンパイル用にFP32に統一
+            print("🔧 コンパイル用にFP32に統一...")
+            model.model = model.model.to(torch.float32)
+            
+            # 2) 事前ウォームアップでコンパイル時間を隠蔽（FP32で）
             print("🔥 ダミー入力でウォームアップ実行中...")
             with torch.no_grad():
-                # バッチサイズ1でダミー入力作成
-                dummy_features = torch.randn(1, 6, 128, 36, device=model.device, dtype=torch.bfloat16)
+                # バッチサイズ1でダミー入力作成（FP32）
+                dummy_features = torch.randn(1, 6, 128, 36, device=model.device, dtype=torch.float32)
                 dummy_masks = torch.ones(1, 6, 128, device=model.device, dtype=torch.bool)
                 
                 # ウォームアップ実行
                 _ = model.model(dummy_features, dummy_masks)
                 print("✅ ウォームアップ完了")
             
-            # コンパイル適用
+            # 3) コンパイル適用（FP32モデルで）
             model.model = torch.compile(model.model, backend="inductor", mode="max-autotune")
             print("✅ TorchCompile適用完了（事前ウォームアップ済み）")
             
