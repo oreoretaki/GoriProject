@@ -43,9 +43,25 @@ class Stage1Dataset(Dataset):
             cache_stats=True
         )
         
-        # 統計情報をロード（存在しない場合は計算）
+        # 統計情報をロード（train専用統計優先）
         try:
-            self.normalizer.load_stats()
+            if split == "train":
+                # trainの場合、まずtrain専用統計を試行
+                try:
+                    self.normalizer.load_stats(split="train")
+                    print(f"   📊 train専用統計をロード")
+                except FileNotFoundError:
+                    print(f"   📊 train専用統計を新規計算中...")
+                    self.normalizer.fit(self.tf_data)
+                    self.normalizer.save_stats(split="train")
+            else:
+                # valの場合、train専用統計を読み込み
+                try:
+                    self.normalizer.load_stats(split="train")
+                    print(f"   📊 train専用統計をロード（val用）")
+                except FileNotFoundError:
+                    print(f"   ⚠️ train専用統計が見つかりません。全期間統計を使用")
+                    self.normalizer.load_stats()
         except FileNotFoundError:
             print(f"   📊 正規化統計を新規計算中...")
             self.normalizer.fit(self.tf_data)

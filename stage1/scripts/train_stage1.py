@@ -19,6 +19,7 @@ import sys
 import argparse
 import yaml
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
@@ -226,6 +227,18 @@ class Stage1LightningModule(pl.LightningModule):
         targets = batch['targets']
         masks = batch['masks']
         
+        # eval_mask_ratioのオーバーライドチェック
+        eval_mask_ratio = self.config.get('evaluation', {}).get('eval_mask_ratio')
+        if eval_mask_ratio is not None:
+            # マスクを再生成
+            from src.masking import MaskingStrategy
+            masking_strategy = MaskingStrategy(self.config)
+            masks = masking_strategy.generate_masks(
+                features, 
+                seed=batch_idx, 
+                eval_mask_ratio_override=eval_mask_ratio
+            )
+        
         # Forward pass
         outputs = self.model(features, masks)
         reconstructed = outputs['reconstructed']
@@ -264,6 +277,55 @@ class Stage1LightningModule(pl.LightningModule):
         # ◆ リアルタイム版（検証中に即座に表示）
         self.log("val_corr_live", mean_corr,
                  on_step=True, on_epoch=False, prog_bar=True, logger=False)
+        
+        return losses['total']
+    
+    def test_step(self, batch, batch_idx):
+        """テストステップ（評価用）"""
+        features = batch['features']
+        targets = batch['targets']
+        masks = batch['masks']
+        
+        # eval_mask_ratioのオーバーライドチェック
+        eval_mask_ratio = self.config.get('evaluation', {}).get('eval_mask_ratio')
+        if eval_mask_ratio is not None:
+            # マスクを再生成
+            from src.masking import MaskingStrategy
+            masking_strategy = MaskingStrategy(self.config)
+            masks = masking_strategy.generate_masks(
+                features, 
+                seed=batch_idx, 
+                eval_mask_ratio_override=eval_mask_ratio
+            )
+        
+        # Forward pass
+        outputs = self.model(features, masks)
+        reconstructed = outputs['reconstructed']
+        
+        # M1データを抽出
+        m1_data = targets[:, 0]
+        
+        # 損失計算
+        losses = self.criterion(reconstructed, targets, masks, m1_data)
+        
+        # テスト損失をログ
+        self.log("test_loss", losses['total'], on_epoch=True, prog_bar=True, logger=True)
+        
+        # 詳細損失
+        for loss_name, loss_value in losses.items():
+            if loss_name != 'total':
+                self.log(f'test_{loss_name}', loss_value, 
+                        on_epoch=True, prog_bar=False, logger=True)
+        
+        # 相関メトリクス計算
+        correlations = self._calculate_correlations(reconstructed, targets, masks)
+        for tf_idx, corr in enumerate(correlations):
+            tf_name = self.config['data']['timeframes'][tf_idx]
+            self.log(f'test_corr_{tf_name}', corr, on_epoch=True, prog_bar=False, logger=True)
+            
+        # 平均相関
+        mean_corr = torch.mean(torch.stack(correlations))
+        self.log('test_correlation_mean', mean_corr, on_epoch=True, prog_bar=True, logger=True)
         
         return losses['total']
         
@@ -788,21 +850,52 @@ def main():
             
             # 新しいモデルとトレーナーを作成
             model = Stage1LightningModule(config)
+            
+            # 各シード用のコールバックとロガーを作成
+            seed_checkpoint_callback = ModelCheckpoint(
+                dirpath=Path(args.config).parent.parent / 'checkpoints' / f'seed_{seed}',
+                filename=f'stage1-seed{seed}-{{epoch:02d}}-{{val_correlation_mean:.4f}}',
+                monitor='val_correlation_mean',
+                mode='max',
+                save_top_k=config['logging']['save_top_k'],
+                save_last=True
+            )
+            
+            seed_early_stopping = EarlyStopping(
+                monitor='val_correlation_mean',
+                mode='max',
+                patience=config['training']['early_stop']['patience'],
+                min_delta=config['training']['early_stop']['min_delta']
+            )
+            
+            try:
+                from pytorch_lightning.loggers import TensorBoardLogger
+                seed_logger = TensorBoardLogger(
+                    save_dir=Path(args.config).parent.parent / 'logs',
+                    name=f'stage1_seed_{seed}'
+                )
+            except ImportError:
+                from pytorch_lightning.loggers import CSVLogger
+                seed_logger = CSVLogger(
+                    save_dir=Path(args.config).parent.parent / 'logs',
+                    name=f'stage1_seed_{seed}'
+                )
+            
             trainer = pl.Trainer(
                 max_epochs=config['training']['epochs'],
-                devices=args.devices,
-                accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-                callbacks=[checkpoint_callback, early_stopping_callback],
-                logger=tb_logger,
+                devices=1 if torch.cuda.is_available() and args.devices > 0 else 'auto',
+                accelerator='gpu' if torch.cuda.is_available() and args.devices > 0 else 'cpu',
+                callbacks=[seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress],
+                logger=seed_logger,
                 precision=config['training']['precision'],
                 gradient_clip_val=config['training']['gradient_clip'],
                 accumulate_grad_batches=config['training']['accumulate_grad_batches'],
-                profiler=args.profiler,
-                fast_dev_run=args.fast_dev_run,
-                enable_checkpointing=True,
                 strategy='auto',
                 log_every_n_steps=config['logging']['log_every_n_steps'],
-                enable_model_summary=False
+                enable_model_summary=False,
+                num_nodes=1,
+                sync_batchnorm=False,
+                use_distributed_sampler=False
             )
             
             # 訓練実行
@@ -812,25 +905,25 @@ def main():
                 trainer.fit(model, train_loader, val_loader)
                 
             # 結果記録
-            best_score = checkpoint_callback.best_model_score
+            best_score = seed_checkpoint_callback.best_model_score
             results.append({
                 'seed': seed,
                 'best_score': best_score,
-                'best_checkpoint': checkpoint_callback.best_model_path
+                'best_checkpoint': seed_checkpoint_callback.best_model_path
             })
             
             print(f"   シード {seed} 完了 - スコア: {best_score}")
         
         # 複数シード結果の統計
-        scores = [r['best_score'] for r in results]
+        scores = [r['best_score'].item() if hasattr(r['best_score'], 'item') else float(r['best_score']) for r in results]
         mean_score = np.mean(scores)
         std_score = np.std(scores)
         
         print(f"\n📊 複数シード結果統計:")
-        print(f"   平均スコア: {mean_score:.6f}")
-        print(f"   標準偏差: {std_score:.6f}")
+        print(f"   平均スコア: {mean_score:.6f} ± {std_score:.6f}")
         print(f"   最高スコア: {max(scores):.6f}")
         print(f"   最低スコア: {min(scores):.6f}")
+        print(f"   実行シード数: {len(scores)}")
         
         # 詳細結果
         print(f"\n📋 詳細結果:")

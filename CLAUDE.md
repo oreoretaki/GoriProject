@@ -195,6 +195,48 @@ When working on Stage 2 (RL Trading Agent):
 
 Stage 1 trained weights provide rich multi-timeframe representations that capture cross-scale dependencies and temporal patterns essential for trading decisions.
 
+## Stage 1 データリーク対策パラメータ
+
+Stage 1では、時系列検証データリーク問題を解決するため、以下の新パラメータを導入：
+
+### validation.val_gap_days
+- **デフォルト値**: `30.0`
+- **推奨値**: `30.0` (30日間のギャップ)
+- **説明**: 訓練データと検証データの間に設ける時間的ギャップ（日数単位）
+- **効果**: 訓練データの最後と検証データの最初の間に30日間のギャップを作り、時系列依存性を完全に断絶
+
+### evaluation.eval_mask_ratio
+- **デフォルト値**: `null` (通常のマスク率を使用)
+- **推奨値**: 
+  - `null`: 通常評価
+  - `0.0`: マスクなし評価（全体復元性能測定）
+  - `1.0`: 全マスク評価（生成能力測定）
+- **説明**: 評価時のマスク率オーバーライド。通常の15%マスクとは異なる条件で評価可能
+- **効果**: 訓練時とは独立したマスク条件で、より公平な評価指標を取得
+
+### 使用例
+```yaml
+# shared_base.yaml での設定
+validation:
+  val_split: 0.2
+  val_gap_days: 30.0             # データリーク防止（30日間の完全分離）
+
+evaluation:
+  eval_mask_ratio: null          # 通常評価（null=15%マスク, 0=マスクなし, 1=全マスク）
+```
+
+### コマンドライン使用例
+```bash
+# デフォルト設定（リーク修正済み）
+python3 scripts/train_stage1.py --config configs/shared_base.yaml --data_dir ../data/derived --devices 1
+
+# カスタムギャップ設定
+python3 scripts/train_stage1.py --config configs/shared_base.yaml --val_gap_days 2.0 --eval_mask_ratio 0.0
+
+# 複数シード評価
+python3 scripts/train_stage1.py --config configs/shared_base.yaml --seeds 42 123 2025
+```
+
 ## 🔧 WSL Environment Compatibility
 
 ### Resolved Issues

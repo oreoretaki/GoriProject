@@ -95,16 +95,32 @@ class TFNormalizer:
         if self.cache_stats:
             self._save_stats()
             
-    def load_stats(self) -> None:
-        """保存済み統計をロード"""
+    def load_stats(self, split: str = "all") -> None:
+        """
+        保存済み統計をロード
         
-        if not self.stats_file.exists():
-            raise FileNotFoundError(f"統計ファイルが見つかりません: {self.stats_file}")
+        Args:
+            split: "all" (通常), "train" (train専用統計)
+        """
+        
+        if split == "train":
+            stats_file = self.stats_train_file
+        else:
+            stats_file = self.stats_file
             
-        with open(self.stats_file, 'r') as f:
-            self.stats = json.load(f)
+        if not stats_file.exists():
+            raise FileNotFoundError(f"統計ファイルが見つかりません: {stats_file}")
             
-        print(f"📂 正規化統計ロード完了: {len(self.stats)}個のTF")
+        with open(stats_file, 'r') as f:
+            data = json.load(f)
+            
+        # 新形式（メタデータ付き）か旧形式かを判定
+        if 'timeframes' in data:
+            self.stats = data['timeframes']
+        else:
+            self.stats = data  # 旧形式
+            
+        print(f"📂 正規化統計ロード完了: {len(self.stats)}個のTF ({split})")
         
     def _save_stats(self) -> None:
         """統計をファイルに保存"""
