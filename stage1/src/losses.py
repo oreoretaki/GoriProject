@@ -74,8 +74,8 @@ class STFTLoss(nn.Module):
                     hop_length = int(scale * self.hop_ratio)
                     
                     # STFT計算（16bit混合精度との互換性のため32bitに変換）
-                    pred_signal_32 = pred_signal.float()
-                    target_signal_32 = target_signal.float()
+                    pred_signal_32 = pred_signal.to(torch.float32)
+                    target_signal_32 = target_signal.to(torch.float32)
                     pred_stft = torch.stft(
                         pred_signal_32, 
                         n_fft=scale, 
@@ -221,8 +221,8 @@ class AmplitudePhaseCorrelationLoss(nn.Module):
                 target_signal = target[:, tf_idx, :, feat_idx]  # [batch, seq_len]
                 
                 # FFT計算（16bit混合精度との互換性のため32bitに変換）
-                pred_signal_32 = pred_signal.float()
-                target_signal_32 = target_signal.float()
+                pred_signal_32 = pred_signal.to(torch.float32)
+                target_signal_32 = target_signal.to(torch.float32)
                 pred_fft = torch.fft.fft(pred_signal_32, dim=-1)
                 target_fft = torch.fft.fft(target_signal_32, dim=-1)
                 
