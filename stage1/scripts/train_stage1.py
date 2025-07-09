@@ -336,7 +336,9 @@ class Stage1LightningModule(pl.LightningModule):
     
     def on_train_epoch_end(self):
         """エポック終了時のAMPスケール変化ログ"""
-        if hasattr(self.trainer, 'precision_plugin') and hasattr(self.trainer.precision_plugin, 'scaler'):
+        if (hasattr(self.trainer, 'precision_plugin') and 
+            hasattr(self.trainer.precision_plugin, 'scaler') and 
+            self.trainer.precision_plugin.scaler is not None):
             current_scale = self.trainer.precision_plugin.scaler.get_scale()
             if self._amp_scale_start is not None:
                 scale_change = current_scale / self._amp_scale_start

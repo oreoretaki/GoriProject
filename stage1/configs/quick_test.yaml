@@ -1,0 +1,31 @@
+# 軽量テスト用設定 - データサイズを大幅削減
+# T5-Large転移学習でクイックテスト
+
+# 共通設定を継承
+extends: t5_large_nofreeze.yaml
+
+# 軽量化設定
+training:
+  batch_size: 256              # 1024→256に削減
+  epochs: 2                    # 7→2エポックに削減
+  accumulate_grad_batches: 1
+  
+# 開発用データ制限（大幅削減）
+development:
+  limit_train_batches: 50      # 2425→50バッチ（約2%）
+  limit_val_batches: 10        # 606→10バッチ（約2%）
+  
+# ログ頻度調整
+logging:
+  log_every_n_steps: 5         # 10→5に変更
+  checkpoint_every_n_epochs: 1
+  save_top_k: 1               # 1つのみ保存
+  
+# 実行設定
+runtime:
+  experiment_name: "quick_test"
+
+# DataLoader設定（軽量化）
+dataloader:
+  num_workers: 8              # 12→8に削減
+  prefetch_factor: 4          # 6→4に削減

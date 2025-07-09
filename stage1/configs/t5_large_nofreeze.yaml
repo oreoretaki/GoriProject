@@ -90,7 +90,7 @@ dataloader:
   persistent_workers: true        # プロセス立ち上げオーバーヘッド削減
   prefetch_factor: 6              # 先読み強化（2→6）
 
-# 開発用設定（総データ量の10%程度）
+# 開発用設定（データ量削減）
 development:
-  limit_train_batches: 4850       # 約10%（48,504の10%）
-  limit_val_batches: 970          # 約10%（train:val = 8:2想定）
+  limit_train_batches: 100        # 2425→100バッチ（約4%）
+  limit_val_batches: 20           # 606→20バッチ（約3%）
