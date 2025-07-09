@@ -88,7 +88,7 @@ augmentation:
 # 検証・メトリクス
 validation:
   val_split: 0.2
-  val_gap_days: 1.0              # 訓練と検証の間の時間的ギャップ（日数）
+  val_gap_days: 1.0              # 訓練と検証の間の時間的ギャップ（日数）- デフォルト有効
   metrics:
     - "correlation_per_tf"
     - "consistency_ratio"
