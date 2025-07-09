@@ -6,7 +6,7 @@ extends: shared_base.yaml
 
 # LR Finder設定（バッチサイズ256用）
 lr_finder:
-  enabled: true                   # バッチサイズ256用のLR Finder有効化
+  enabled: false                  # LR Finder完了 - バッチサイズ1024用推奨値適用済み
   min_lr: 1e-7                   # 開始学習率を上げる
   max_lr: 1e-2                   # 終了学習率を下げる
   num_training: 200              # ステップ数を増やして詳細に
