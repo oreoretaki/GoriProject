@@ -46,7 +46,7 @@ class PatchEmbedding(nn.Module):
         ])
         
         # 位置エンコーディング
-        self.pos_embedding = nn.Parameter(torch.randn(1, 1000, d_model) * 0.02)
+        self.pos_embedding = nn.Parameter(torch.randn(1, 1000, d_model, dtype=torch.float32) * 0.02)
         
         # Layer normalization
         self.layer_norm = nn.LayerNorm(d_model)
@@ -231,7 +231,7 @@ class T5TimeSeriesAdapter(nn.Module):
             # T5エンコーダーに入力
             encoder_outputs = self.t5_encoder(
                 inputs_embeds=tf_patches,
-                attention_mask=tf_mask.float()
+                attention_mask=tf_mask.to(torch.float32)
             )
             
             # 最後の隠れ状態を取得

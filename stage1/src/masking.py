@@ -134,7 +134,7 @@ class MaskingStrategy:
             
         # 有効データ範囲でのみマスキング
         adapted_mask = base_mask.clone()
-        adapted_mask = adapted_mask * valid_mask.float()
+        adapted_mask = adapted_mask * valid_mask.to(torch.float32)
         
         return adapted_mask
         

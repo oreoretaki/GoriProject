@@ -120,9 +120,9 @@ class Stage1Dataset(Dataset):
         # ターゲット用の正規化（OHLC用）
         targets = self.normalizer.normalize_targets(targets)
         
-        # 既にテンソル形式
-        features_tensor = features.float()
-        targets_tensor = targets.float()
+        # 既にテンソル形式（BF16互換）
+        features_tensor = features.to(torch.float32)
+        targets_tensor = targets.to(torch.float32)
         
         # マスキング（features_tensorを使用）
         masks_tensor = self.masking_strategy.generate_masks(features_tensor, seed=idx)
