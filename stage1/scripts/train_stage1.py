@@ -552,7 +552,7 @@ def main():
             print("🔥 ダミー入力でウォームアップ実行中...")
             with torch.no_grad():
                 # バッチサイズ1でダミー入力作成（FP32）
-                dummy_features = torch.randn(1, 6, 128, 36, device=model.device, dtype=torch.float32)
+                dummy_features = torch.randn(1, 6, 128, 6, device=model.device, dtype=torch.float32)
                 dummy_masks = torch.ones(1, 6, 128, device=model.device, dtype=torch.bool)
                 
                 # ウォームアップ実行
