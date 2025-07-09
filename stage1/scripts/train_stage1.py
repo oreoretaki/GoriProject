@@ -881,22 +881,32 @@ def main():
                     name=f'stage1_seed_{seed}'
                 )
             
-            trainer = pl.Trainer(
-                max_epochs=config['training']['epochs'],
-                devices=1 if torch.cuda.is_available() and args.devices > 0 else 'auto',
-                accelerator='gpu' if torch.cuda.is_available() and args.devices > 0 else 'cpu',
-                callbacks=[seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress],
-                logger=seed_logger,
-                precision=config['training']['precision'],
-                gradient_clip_val=config['training']['gradient_clip'],
-                accumulate_grad_batches=config['training']['accumulate_grad_batches'],
-                strategy='auto',
-                log_every_n_steps=config['logging']['log_every_n_steps'],
-                enable_model_summary=False,
-                num_nodes=1,
-                sync_batchnorm=False,
-                use_distributed_sampler=False
-            )
+            # 複数シード用のトレーナー設定
+            seed_trainer_kwargs = {
+                'max_epochs': config['training']['epochs'],
+                'devices': 1 if torch.cuda.is_available() and args.devices > 0 else 'auto',
+                'accelerator': 'gpu' if torch.cuda.is_available() and args.devices > 0 else 'cpu',
+                'callbacks': [seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress],
+                'logger': seed_logger,
+                'precision': config['training']['precision'],
+                'gradient_clip_val': config['training']['gradient_clip'],
+                'accumulate_grad_batches': config['training']['accumulate_grad_batches'],
+                'strategy': 'auto',
+                'log_every_n_steps': config['logging']['log_every_n_steps'],
+                'enable_model_summary': False,
+                'num_nodes': 1,
+                'sync_batchnorm': False,
+                'use_distributed_sampler': False
+            }
+            
+            # 開発用設定（バッチ数制限）を複数シード実行にも適用
+            if 'development' in config:
+                if 'limit_train_batches' in config['development']:
+                    seed_trainer_kwargs['limit_train_batches'] = config['development']['limit_train_batches']
+                if 'limit_val_batches' in config['development']:
+                    seed_trainer_kwargs['limit_val_batches'] = config['development']['limit_val_batches']
+            
+            trainer = pl.Trainer(**seed_trainer_kwargs)
             
             # 訓練実行
             if args.resume_from:
