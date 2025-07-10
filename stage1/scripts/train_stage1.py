@@ -138,8 +138,8 @@ class Stage1LightningModule(pl.LightningModule):
         features = batch['features']  # [batch, n_tf, seq_len, n_features] 生データ
         targets = batch['targets']    # [batch, n_tf, seq_len, 4]
         
-        # T5勾配フローチェック（最初の数ステップのみ）
-        if batch_idx < 3:
+        # T5勾配フローチェック（T5転移学習時のみ、最初の数ステップ）
+        if batch_idx < 3 and hasattr(self.model.shared_encoder, 't5_encoder'):
             t5_encoder = self.model.shared_encoder.t5_encoder
             # T5EncoderModelの正しい構造を使用
             sample_param = t5_encoder.encoder.block[0].layer[0].SelfAttention.q.weight
