@@ -611,7 +611,7 @@ def main():
             with torch.no_grad():
                 # バッチサイズ1でダミー入力作成（FP32）
                 dummy_features = torch.randn(1, 6, 128, 6, device=model.device, dtype=torch.float32)
-                dummy_masks = torch.ones(1, 6, 128, device=model.device, dtype=torch.bool)
+                dummy_masks = torch.zeros(1, 6, 128, device=model.device, dtype=torch.bool)
                 
                 # ウォームアップ実行
                 _ = model.model(dummy_features, dummy_masks)
@@ -900,6 +900,10 @@ def main():
                     seed_trainer_kwargs['limit_train_batches'] = config['development']['limit_train_batches']
                 if 'limit_val_batches' in config['development']:
                     seed_trainer_kwargs['limit_val_batches'] = config['development']['limit_val_batches']
+            
+            # fast_dev_runを複数シード実行にも適用
+            if args.fast_dev_run:
+                seed_trainer_kwargs['fast_dev_run'] = True
             
             trainer = pl.Trainer(**seed_trainer_kwargs)
             

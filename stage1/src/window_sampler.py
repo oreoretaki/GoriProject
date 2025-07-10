@@ -281,8 +281,19 @@ class MultiTFWindowSampler:
                     tf_gap_windows = int(val_gap_minutes / tf_step)
                     print(f"     {tf_name}: {tf_gap_windows}窓 ({tf_step}分間隔)")
             
-            # 訓練: 最後の (n_val + gap_windows) を除外
-            return self.valid_windows[:-(n_val + gap_windows)]
+            # TF毎のギャップを考慮した訓練データ分割
+            # 注意: 現在は全TF共通のvalid_windowsを使用しているため、
+            # 最も制限の厳しい（最大の）gap_windowsを使用
+            max_gap_windows = gap_windows  # M1ベース（最大値）
+            for tf_name in self.step_map:
+                tf_step = self.step_map[tf_name]
+                tf_gap_windows = int(val_gap_minutes / tf_step)
+                max_gap_windows = max(max_gap_windows, tf_gap_windows)
+            
+            print(f"   📊 適用ギャップ窓数: {max_gap_windows} (全TF中の最大値)")
+            
+            # 訓練: 最後の (n_val + max_gap_windows) を除外
+            return self.valid_windows[:-(n_val + max_gap_windows)]
         else:  # val
             # 検証: 最後の n_val のみ使用（gapの後から）
             val_windows = self.valid_windows[-n_val:]
