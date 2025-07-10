@@ -52,12 +52,18 @@ model:
 # 学習設定
 training:
   batch_size: 32              # バランスモード：適度な学習速度
+  epochs: 40                  # 最大エポック数
   learning_rate: 1e-3
   weight_decay: 1e-4
   warmup_epochs: 3            # 延長：2→3エポック
   accumulate_grad_batches: 8
   gradient_clip: 0.012        # 5倍データ対応で緩和（0.008→0.012）
   precision: "bf16"           # H100最適化：BF16でTensor Core活用
+  
+  # 早期停止設定
+  early_stop:
+    patience: 5
+    min_delta: 0.001
   
   # 統一されたオプティマイザー設定
   optimizer:
