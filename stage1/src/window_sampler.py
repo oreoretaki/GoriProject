@@ -277,7 +277,22 @@ class MultiTFWindowSampler:
             return self.valid_windows[:-(n_val + gap_windows)]
         else:  # val
             # 検証: 最後の n_val のみ使用（gapの後から）
-            return self.valid_windows[-n_val:]
+            val_windows = self.valid_windows[-n_val:]
+            
+            # デバッグ出力：検証データの最初のタイムスタンプを表示
+            if val_windows:
+                first_val_ts = val_windows[0][0]  # (start_time, end_time)のstart_time
+                print(f"   [DBG] 検証データ開始時刻: {first_val_ts}")
+                
+                # 訓練データの最後のタイムスタンプも表示
+                if n_val + gap_windows < len(self.valid_windows):
+                    last_train_window = self.valid_windows[-(n_val + gap_windows) - 1]
+                    last_train_ts = last_train_window[1]  # end_time
+                    gap_actual = (first_val_ts - last_train_ts).total_seconds() / 86400  # 日数
+                    print(f"   [DBG] 訓練データ終了時刻: {last_train_ts}")
+                    print(f"   [DBG] 実際のギャップ: {gap_actual:.1f}日")
+                    
+            return val_windows
             
     def __len__(self) -> int:
         """サンプル数"""
