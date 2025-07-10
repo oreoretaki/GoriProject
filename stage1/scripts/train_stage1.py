@@ -881,7 +881,7 @@ def main():
                 'max_epochs': config['training']['epochs'],
                 'devices': 1 if torch.cuda.is_available() and args.devices > 0 else 'auto',
                 'accelerator': 'gpu' if torch.cuda.is_available() and args.devices > 0 else 'cpu',
-                'callbacks': [seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress] + ([gradual_unfreezing] if T5_CALLBACKS_AVAILABLE and gradual_unfreezing else []),
+                'callbacks': [seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress] + ([unfreezing_callback] if T5_CALLBACKS_AVAILABLE and config.get('transfer_learning', {}).get('use_pretrained_lm', False) else []),
                 'logger': seed_logger,
                 'precision': config['training']['precision'],
                 'gradient_clip_val': config['training']['gradient_clip'],
