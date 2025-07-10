@@ -144,8 +144,11 @@ class Stage1Dataset(Dataset):
         # マスキング（features_tensorを使用）
         masks_tensor = self.masking_strategy.generate_masks(features_tensor, seed=idx)
         
+        # マスクを特徴量に適用（重要！）
+        masked_features = self.masking_strategy.apply_mask_to_features(features_tensor, masks_tensor)
+        
         return {
-            'features': features_tensor,
+            'features': masked_features,  # マスク適用済み特徴量
             'targets': targets_tensor,
             'masks': masks_tensor
         }
