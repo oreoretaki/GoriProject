@@ -60,6 +60,7 @@ masking:
   mask_span_min: 3
   mask_span_max: 10
   sync_across_tf: false          # H4問題回避のため各TF独立マスク
+  mask_token_lr_scale: 1.0       # マスクトークンの学習率スケール
 
 # 正規化設定
 normalization:

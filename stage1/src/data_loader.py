@@ -15,7 +15,6 @@ from pathlib import Path
 from .window_sampler import MultiTFWindowSampler
 from .feature_engineering import FeatureEngineer
 from .normalization import TFNormalizer
-from .masking import MaskingStrategy
 
 class Stage1Dataset(Dataset):
     """Stage 1 データセット（最適化版）"""
@@ -78,8 +77,7 @@ class Stage1Dataset(Dataset):
             val_gap_days=config['validation'].get('val_gap_days', 1.0)
         )
         
-        # マスキング戦略
-        self.masking_strategy = MaskingStrategy(config)
+        # 注意：マスキングはモデル内で実行（data_loader側では生データを返す）
         
     def _load_tf_data(self) -> Dict[str, pd.DataFrame]:
         """TFデータを高速読み込み"""
@@ -141,16 +139,10 @@ class Stage1Dataset(Dataset):
         features_tensor = features.to(torch.float32)
         targets_tensor = targets.to(torch.float32)
         
-        # マスキング（features_tensorを使用）
-        masks_tensor = self.masking_strategy.generate_masks(features_tensor, seed=idx)
-        
-        # マスクを特徴量に適用（重要！）
-        masked_features = self.masking_strategy.apply_mask_to_features(features_tensor, masks_tensor)
-        
+        # 🔥 生データを返す（マスキングはモデル内で実行）
         return {
-            'features': masked_features,  # マスク適用済み特徴量
-            'targets': targets_tensor,
-            'masks': masks_tensor
+            'features': features_tensor,  # 生の特徴量（マスクなし）
+            'targets': targets_tensor
         }
 
 def create_stage1_dataloaders(data_dir: str, config: dict) -> Tuple[DataLoader, DataLoader]:

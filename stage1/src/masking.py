@@ -6,20 +6,24 @@ Stage 1 マスキング戦略
 
 import numpy as np
 import torch
+import torch.nn as nn
 from typing import Dict, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
-class MaskingStrategy:
-    """マスキング戦略クラス"""
+class MaskingStrategy(nn.Module):
+    """マスキング戦略クラス（Learnable Mask Token版）"""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, n_features: int = 6):
         """
         Args:
             config: 設定辞書
+            n_features: 特徴量数（mask_tokenの次元）
         """
+        super().__init__()
         self.config = config
         self.timeframes = config['data']['timeframes']
+        self.n_features = n_features
         
         # マスキング設定
         self.mask_ratio = config['masking']['mask_ratio']  # 0.15
@@ -27,10 +31,14 @@ class MaskingStrategy:
         self.mask_span_max = config['masking']['mask_span_max']  # 60
         self.sync_across_tf = config['masking']['sync_across_tf']  # True
         
-        print(f"🎭 MaskingStrategy初期化")
+        # 🔥 Learnable Mask Token（学習可能なマスクトークン）
+        self.mask_token = nn.Parameter(torch.randn(n_features) * 0.02)
+        
+        print(f"🎭 MaskingStrategy初期化（Learnable Mask Token版）")
         print(f"   マスク率: {self.mask_ratio}")
         print(f"   スパン範囲: {self.mask_span_min}-{self.mask_span_max}")
         print(f"   TF間同期: {self.sync_across_tf}")
+        print(f"   💡 Learnable Mask Token: {n_features}次元（初期値: μ={self.mask_token.mean():.3f}, σ={self.mask_token.std():.3f}）")
         
         # 乱数生成器（再現性のため）
         self.rng = np.random.RandomState()
@@ -65,11 +73,11 @@ class MaskingStrategy:
             effective_mask_ratio = eval_mask_ratio_override
             print(f"   [MASK DBG] Override: {self.mask_ratio} → {effective_mask_ratio}")
             
-        # バッチサイズに応じてマスクの形状を決定（featuresと同じデバイスに配置）
+        # 🔥 バッチサイズに応じてマスクの形状を決定（bool型で統一）
         if features.dim() == 4:
-            masks = torch.zeros(batch_size, n_tf, seq_len, device=features.device, dtype=torch.float32)
+            masks = torch.zeros(batch_size, n_tf, seq_len, device=features.device, dtype=torch.bool)
         else:
-            masks = torch.zeros(n_tf, seq_len, device=features.device, dtype=torch.float32)
+            masks = torch.zeros(n_tf, seq_len, device=features.device, dtype=torch.bool)
         
         if self.sync_across_tf:
             # TF間同期マスキング: M1ベースでマスクを生成し、他のTFに適用
@@ -129,7 +137,7 @@ class MaskingStrategy:
         Returns:
             mask: [seq_len] マスクテンソル
         """
-        mask = torch.zeros(seq_len)
+        mask = torch.zeros(seq_len, dtype=torch.bool)  # 🔥 bool型で統一
         effective_mask_ratio = mask_ratio if mask_ratio is not None else self.mask_ratio
         target_masked = int(seq_len * effective_mask_ratio)
         masked_count = 0
@@ -148,20 +156,20 @@ class MaskingStrategy:
             end_pos = min(start_pos + span_len, seq_len)
             
             # マスク適用
-            mask[start_pos:end_pos] = 1.0
+            mask[start_pos:end_pos] = True
             masked_count = mask.sum().item()
             
             # 目標マスク数を超えた場合は調整
             if masked_count > target_masked:
                 # 超過分をランダムに解除
-                masked_indices = torch.where(mask == 1.0)[0]
+                masked_indices = torch.where(mask)[0]  # bool型対応
                 excess = int(masked_count - target_masked)
                 if excess > 0:
                     remove_indices = masked_indices[torch.randperm(len(masked_indices))[:excess]]
-                    mask[remove_indices] = 0.0
+                    mask[remove_indices] = False
                 break
                 
-        return mask
+        return mask  # 🔥 既にbool型なのでそのまま返す
         
     def _adapt_mask_to_tf(self, base_mask: torch.Tensor, tf_features: torch.Tensor, seq_len: int) -> torch.Tensor:
         """
@@ -180,28 +188,39 @@ class MaskingStrategy:
         
         if not valid_mask.any():
             # データが存在しない場合はマスクしない
-            return torch.zeros(seq_len)
+            return torch.zeros(seq_len, dtype=torch.bool)
             
         # 有効データ範囲でのみマスキング
         adapted_mask = base_mask.clone()
-        adapted_mask = adapted_mask * valid_mask.to(torch.float32)
+        adapted_mask = adapted_mask & valid_mask  # bool演算で統一
         
         return adapted_mask
         
     def apply_mask_to_features(self, features: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
         """
-        特徴量にマスクを適用
+        特徴量にマスクを適用（Learnable Mask Token版）
         
         Args:
             features: [n_tf, seq_len, n_features] 特徴量
-            masks: [n_tf, seq_len] マスク
+            masks: [n_tf, seq_len] マスク（1=マスク, 0=観測）
             
         Returns:
             masked_features: [n_tf, seq_len, n_features] マスク済み特徴量
         """
-        # マスク部分を0に設定
-        mask_expanded = masks.unsqueeze(-1)  # [n_tf, seq_len, 1]
-        masked_features = features * (1 - mask_expanded)
+        # 特徴量をコピー（inplace操作のため）
+        masked_features = features.clone()
+        
+        # マスク位置を特定 [n_tf, seq_len, 1] -> bool
+        mask_expanded = masks.unsqueeze(-1).bool()  # [n_tf, seq_len, 1]
+        
+        # 🔥 マスク位置にLearnable Mask Tokenを設定（0乗算ではなくinplace置換）
+        # mask_tokenを各マスク位置に適用
+        n_tf, seq_len, n_features = features.shape
+        mask_token_expanded = self.mask_token.unsqueeze(0).unsqueeze(0)  # [1, 1, n_features]
+        mask_token_broadcasted = mask_token_expanded.expand(n_tf, seq_len, n_features)
+        
+        # マスク位置のみを置換
+        masked_features[mask_expanded.expand_as(features)] = mask_token_broadcasted[mask_expanded.expand_as(features)]
         
         return masked_features
         

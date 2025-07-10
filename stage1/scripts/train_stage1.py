@@ -131,13 +131,12 @@ class Stage1LightningModule(pl.LightningModule):
         print("⚡ Stage1LightningModule初期化完了")
         print(f"   モデル情報: {self.model.get_model_info()}")
         
-    def forward(self, features, masks=None):
-        return self.model(features, masks)
+    def forward(self, features, training_masks=None):
+        return self.model(features, training_masks=training_masks)
         
     def training_step(self, batch, batch_idx):
-        features = batch['features']  # [batch, n_tf, seq_len, n_features]
+        features = batch['features']  # [batch, n_tf, seq_len, n_features] 生データ
         targets = batch['targets']    # [batch, n_tf, seq_len, 4]
-        masks = batch['masks']        # [batch, n_tf, seq_len]
         
         # T5勾配フローチェック（最初の数ステップのみ）
         if batch_idx < 3:
@@ -151,15 +150,16 @@ class Stage1LightningModule(pl.LightningModule):
             else:
                 print(f"   [T5 DBG] Step {batch_idx}: grad=None")
         
-        # Forward pass
-        outputs = self.model(features, masks)
+        # Forward pass（新しいAPI - モデル内でマスキング）
+        outputs = self.model(features)  # training_masks=Noneで自動生成
         reconstructed = outputs['reconstructed']
+        training_masks = outputs['training_masks']  # モデルが生成したマスク
         
         # M1データを抽出（クロス損失用）
         m1_data = targets[:, 0]  # [batch, seq_len, 4]
         
-        # 損失計算
-        losses = self.criterion(reconstructed, targets, masks, m1_data)
+        # 損失計算（モデル生成マスクを使用）
+        losses = self.criterion(reconstructed, targets, training_masks, m1_data)
         
         # ◆ 学習損失を毎ステップでログ（プログレスバーに表示）
         loss = losses['total']
@@ -235,31 +235,35 @@ class Stage1LightningModule(pl.LightningModule):
         return super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
         
     def validation_step(self, batch, batch_idx):
-        features = batch['features']
+        features = batch['features']  # 生の特徴量
         targets = batch['targets']
-        masks = batch['masks']
         
         # eval_mask_ratioのオーバーライドチェック
         eval_mask_ratio = self.config.get('evaluation', {}).get('eval_mask_ratio')
-        if eval_mask_ratio is not None:
-            # マスクを再生成
-            from src.masking import MaskingStrategy
-            masking_strategy = MaskingStrategy(self.config)
-            masks = masking_strategy.generate_masks(
-                features, 
-                seed=batch_idx, 
-                eval_mask_ratio_override=eval_mask_ratio
-            )
+        training_masks = None
         
-        # Forward pass
-        outputs = self.model(features, masks)
+        if eval_mask_ratio is not None:
+            # 🔥 eval_mask_ratio指定時：カスタムマスクを生成
+            batch_size, n_tf, seq_len, n_features = features.shape
+            training_masks = torch.stack([
+                self.model.masking_strategy.generate_masks(
+                    features[b], 
+                    seed=batch_idx * batch_size + b, 
+                    eval_mask_ratio_override=eval_mask_ratio
+                )
+                for b in range(batch_size)
+            ], dim=0)  # [batch, n_tf, seq_len]
+        
+        # Forward pass（新しいAPI）
+        outputs = self.model(features, training_masks=training_masks)
         reconstructed = outputs['reconstructed']
+        actual_training_masks = outputs['training_masks']  # 実際に使用されたマスク
         
         # M1データを抽出
         m1_data = targets[:, 0]
         
-        # 損失計算
-        losses = self.criterion(reconstructed, targets, masks, m1_data)
+        # 損失計算（新しいマスクを使用）
+        losses = self.criterion(reconstructed, targets, actual_training_masks, m1_data)
         
         # ◆ 検証損失をプログレスバーに表示（エポック終了時）
         self.log("val_loss", losses['total'],
@@ -275,8 +279,8 @@ class Stage1LightningModule(pl.LightningModule):
                 self.log(f'val_{loss_name}', loss_value, 
                         on_epoch=True, prog_bar=False, logger=True)
             
-        # 相関メトリクス計算（検証のみ）
-        correlations = self._calculate_correlations(reconstructed, targets, masks)
+        # 🔥 相関メトリクス計算（マスク位置のみ・リーク完全遮断版）
+        correlations = self._calculate_correlations(reconstructed, targets, actual_training_masks)
         for tf_idx, corr in enumerate(correlations):
             tf_name = self.config['data']['timeframes'][tf_idx]
             self.log(f'val_corr_{tf_name}', corr, on_epoch=True, prog_bar=False, logger=True)
@@ -294,31 +298,35 @@ class Stage1LightningModule(pl.LightningModule):
     
     def test_step(self, batch, batch_idx):
         """テストステップ（評価用）"""
-        features = batch['features']
+        features = batch['features']  # 生の特徴量
         targets = batch['targets']
-        masks = batch['masks']
         
         # eval_mask_ratioのオーバーライドチェック
         eval_mask_ratio = self.config.get('evaluation', {}).get('eval_mask_ratio')
-        if eval_mask_ratio is not None:
-            # マスクを再生成
-            from src.masking import MaskingStrategy
-            masking_strategy = MaskingStrategy(self.config)
-            masks = masking_strategy.generate_masks(
-                features, 
-                seed=batch_idx, 
-                eval_mask_ratio_override=eval_mask_ratio
-            )
+        training_masks = None
         
-        # Forward pass
-        outputs = self.model(features, masks)
+        if eval_mask_ratio is not None:
+            # 🔥 eval_mask_ratio指定時：カスタムマスクを生成
+            batch_size, n_tf, seq_len, n_features = features.shape
+            training_masks = torch.stack([
+                self.model.masking_strategy.generate_masks(
+                    features[b], 
+                    seed=batch_idx * batch_size + b, 
+                    eval_mask_ratio_override=eval_mask_ratio
+                )
+                for b in range(batch_size)
+            ], dim=0)  # [batch, n_tf, seq_len]
+        
+        # Forward pass（新しいAPI）
+        outputs = self.model(features, training_masks=training_masks)
         reconstructed = outputs['reconstructed']
+        actual_training_masks = outputs['training_masks']  # 実際に使用されたマスク
         
         # M1データを抽出
         m1_data = targets[:, 0]
         
-        # 損失計算
-        losses = self.criterion(reconstructed, targets, masks, m1_data)
+        # 損失計算（新しいマスクを使用）
+        losses = self.criterion(reconstructed, targets, actual_training_masks, m1_data)
         
         # テスト損失をログ
         self.log("test_loss", losses['total'], on_epoch=True, prog_bar=True, logger=True)
@@ -329,8 +337,8 @@ class Stage1LightningModule(pl.LightningModule):
                 self.log(f'test_{loss_name}', loss_value, 
                         on_epoch=True, prog_bar=False, logger=True)
         
-        # 相関メトリクス計算
-        correlations = self._calculate_correlations(reconstructed, targets, masks)
+        # 🔥 相関メトリクス計算（マスク位置のみ）
+        correlations = self._calculate_correlations(reconstructed, targets, actual_training_masks)
         for tf_idx, corr in enumerate(correlations):
             tf_name = self.config['data']['timeframes'][tf_idx]
             self.log(f'test_corr_{tf_name}', corr, on_epoch=True, prog_bar=False, logger=True)
@@ -341,19 +349,19 @@ class Stage1LightningModule(pl.LightningModule):
         
         return losses['total']
         
-    def _calculate_correlations(self, pred, target, masks):
-        """TFごとの相関を計算"""
+    def _calculate_correlations(self, pred, target, training_masks):
+        """TFごとの相関を計算（マスク位置のみ）"""
         correlations = []
         
         for tf_idx in range(pred.size(1)):
             pred_tf = pred[:, tf_idx]  # [batch, seq_len, 4]
             target_tf = target[:, tf_idx]
-            mask_tf = masks[:, tf_idx]  # [batch, seq_len]
+            mask_tf = training_masks[:, tf_idx]  # [batch, seq_len]
             
             # マスクされた部分のみで相関計算
             if mask_tf.sum() > 0:
-                pred_masked = pred_tf[mask_tf.bool()]  # [n_masked, 4]
-                target_masked = target_tf[mask_tf.bool()]
+                pred_masked = pred_tf[mask_tf]  # [n_masked, 4] - 既にbool型
+                target_masked = target_tf[mask_tf]
                 
                 if pred_masked.numel() > 0:
                     # ピアソン相関（4つのOHLC特徴量の平均）
@@ -423,6 +431,32 @@ class Stage1LightningModule(pl.LightningModule):
                 t5_lr_top=t5_lr_top
             )
             
+            # マスクトークン学習率スケール対応（T5転移学習時）
+            mask_token_lr_scale = self.config.get('masking', {}).get('mask_token_lr_scale', 1.0)
+            if mask_token_lr_scale != 1.0:
+                # 既存のパラメータグループからマスクトークンを分離
+                mask_token_params = []
+                for group in param_groups:
+                    remaining_params = []
+                    for param in group['params']:
+                        # パラメータ名を特定するために逆引き
+                        for name, model_param in self.model.named_parameters():
+                            if param is model_param and 'masking_strategy.mask_token' in name:
+                                mask_token_params.append(param)
+                                break
+                        else:
+                            remaining_params.append(param)
+                    group['params'] = remaining_params
+                
+                # マスクトークン専用グループを追加
+                if mask_token_params:
+                    param_groups.append({
+                        'params': mask_token_params,
+                        'lr': base_lr * mask_token_lr_scale,
+                        'name': 'mask_token'
+                    })
+                    print(f"🎭 T5+マスクトークン: mask_token_lr={base_lr * mask_token_lr_scale:.2e} (scale={mask_token_lr_scale})")
+            
             optimizer = torch.optim.AdamW(
                 param_groups,
                 betas=self.config['training']['optimizer']['betas'],
@@ -440,14 +474,51 @@ class Stage1LightningModule(pl.LightningModule):
                 print(f"  ParamGroup[{i}] ({group.get('name', 'unknown')}): lr={group['lr']:.2e}")
             
         else:
-            # 従来の単一学習率
-            optimizer = torch.optim.AdamW(
-                self.parameters(),
-                lr=base_lr,
-                betas=self.config['training']['optimizer']['betas'],
-                weight_decay=self.config['training']['optimizer']['weight_decay']
-            )
-            print(f"📐 単一学習率: lr={base_lr:.2e}")
+            # 従来の単一学習率 + マスクトークン学習率スケール対応
+            mask_token_lr_scale = self.config.get('masking', {}).get('mask_token_lr_scale', 1.0)
+            
+            if mask_token_lr_scale != 1.0:
+                # マスクトークン専用の学習率グループを作成
+                mask_token_params = []
+                other_params = []
+                
+                for name, param in self.model.named_parameters():
+                    if 'masking_strategy.mask_token' in name:
+                        mask_token_params.append(param)
+                    else:
+                        other_params.append(param)
+                
+                param_groups = [
+                    {
+                        'params': other_params,
+                        'lr': base_lr,
+                        'name': 'main_params'
+                    },
+                    {
+                        'params': mask_token_params,
+                        'lr': base_lr * mask_token_lr_scale,
+                        'name': 'mask_token'
+                    }
+                ]
+                
+                optimizer = torch.optim.AdamW(
+                    param_groups,
+                    betas=self.config['training']['optimizer']['betas'],
+                    weight_decay=self.config['training']['optimizer']['weight_decay']
+                )
+                
+                print(f"📐 マスクトークン学習率スケール: scale={mask_token_lr_scale}")
+                print(f"  - メインパラメータ: lr={base_lr:.2e}")
+                print(f"  - マスクトークン: lr={base_lr * mask_token_lr_scale:.2e}")
+            else:
+                # 通常の単一学習率
+                optimizer = torch.optim.AdamW(
+                    self.parameters(),
+                    lr=base_lr,
+                    betas=self.config['training']['optimizer']['betas'],
+                    weight_decay=self.config['training']['optimizer']['weight_decay']
+                )
+                print(f"📐 単一学習率: lr={base_lr:.2e}")
         
         # スケジューラー
         scheduler_config = self.config['training']['scheduler']
@@ -558,6 +629,7 @@ def main():
     parser.add_argument('--check_early_stop', action='store_true', help='早期停止動作テスト')
     parser.add_argument('--val_gap_days', type=float, default=None, help='訓練と検証の間の時間的ギャップ（日数）')
     parser.add_argument('--eval_mask_ratio', type=float, default=None, help='評価時のマスク率 (0=マスクなし, 1=全マスク)')
+    parser.add_argument('--mask_token_lr_scale', type=float, default=None, help='マスクトークンの学習率スケール (例: 0.1)')
     parser.add_argument('--seeds', type=int, nargs='+', default=None, help='複数シード実行 (例: --seeds 42 123 2025)')
     
     args = parser.parse_args()
@@ -577,6 +649,10 @@ def main():
         config['validation']['val_gap_days'] = args.val_gap_days
     if args.eval_mask_ratio is not None:
         config['evaluation']['eval_mask_ratio'] = args.eval_mask_ratio
+    if args.mask_token_lr_scale is not None:
+        if 'masking' not in config:
+            config['masking'] = {}
+        config['masking']['mask_token_lr_scale'] = args.mask_token_lr_scale
     
     print("🚀 Stage 1 訓練開始")
     print(f"   設定ファイル: {args.config}")

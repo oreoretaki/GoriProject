@@ -20,6 +20,9 @@ except ImportError:
     T5TimeSeriesAdapter = None
     T5_AVAILABLE = False
 
+# マスキング戦略インポート
+from .masking import MaskingStrategy
+
 class TFSpecificStem(nn.Module):
     """TF固有ステム: 1D depth-wise CNN"""
     
@@ -173,11 +176,16 @@ class SharedEncoder(nn.Module):
         """
         Args:
             tf_features: [batch, n_tf, seq_len, d_model]
-            masks: [batch, n_tf, seq_len] padding masks
+            masks: [batch, n_tf, seq_len] padding masks (optional, auto-generated from NaN)
         Returns:
             encoded: [batch, n_tf, seq_len, d_model]
         """
         batch_size, n_tf, seq_len, d_model = tf_features.shape
+        
+        # 🔥 NaN-paddedシーケンス用のattention_mask自動生成
+        if masks is None:
+            # NaN値を検出してpadding maskを作成 (True=マスク対象, False=有効データ)
+            masks = torch.isnan(tf_features).any(dim=-1)  # [batch, n_tf, seq_len]
         
         # Process each TF separately first
         for layer_idx, layer in enumerate(self.layers):
@@ -337,6 +345,9 @@ class Stage1Model(nn.Module):
             for _ in range(self.n_tf)
         ])
         
+        # 🔥 Learnable Mask Token Strategy
+        self.masking_strategy = MaskingStrategy(config, n_features=self.n_features)
+        
         # Positional encoding
         self.pos_encoding = self._create_positional_encoding()
         
@@ -344,35 +355,60 @@ class Stage1Model(nn.Module):
         """位置エンコーディング作成"""
         return nn.Embedding(self.seq_len, self.d_model)
         
-    def forward(self, features: torch.Tensor, masks: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+    def forward(self, features: torch.Tensor, masks: Optional[torch.Tensor] = None, training_masks: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
         Args:
-            features: [batch, n_tf, seq_len, n_features] 入力特徴量
-            masks: [batch, n_tf, seq_len] パディング/マスクマスク
+            features: [batch, n_tf, seq_len, n_features] 入力特徴量（生データ）
+            masks: [batch, n_tf, seq_len] パディング/マスクマスク（従来）
+            training_masks: [batch, n_tf, seq_len] 自己教師ありマスク（新規）
             
         Returns:
             outputs: {
                 'reconstructed': [batch, n_tf, seq_len, 4] 再構築されたOHLC,
-                'encoded': [batch, n_tf, latent_len, d_model] エンコード済み表現
+                'encoded': [batch, n_tf, latent_len, d_model] エンコード済み表現,
+                'masked_features': [batch, n_tf, seq_len, n_features] マスク適用済み特徴量,
+                'training_masks': [batch, n_tf, seq_len] 生成されたマスク
             }
         """
         batch_size, n_tf, seq_len, n_features = features.shape
         
-        # Shared encoding
+        # 🔥 自己教師ありマスキング処理
+        if training_masks is None and self.training:
+            # 訓練時：各サンプルに対してマスクを生成（再現性担保）
+            training_masks = torch.stack([
+                self.masking_strategy.generate_masks(
+                    features[b], 
+                    seed=hash((id(features), b)) % 2147483647  # 再現性担保
+                )  # [n_tf, seq_len]
+                for b in range(batch_size)
+            ], dim=0)  # [batch, n_tf, seq_len]
+        
+        # マスクされた特徴量を生成
+        if training_masks is not None:
+            masked_features = torch.stack([
+                self.masking_strategy.apply_mask_to_features(features[b], training_masks[b])
+                for b in range(batch_size)
+            ], dim=0)  # [batch, n_tf, seq_len, n_features]
+        else:
+            # 推論時またはマスクなし
+            masked_features = features
+            training_masks = torch.zeros(batch_size, n_tf, seq_len, device=features.device, dtype=torch.bool)
+        
+        # Shared encoding（マスク済み特徴量を使用）
         if isinstance(self.shared_encoder, T5TimeSeriesAdapter):
-            # T5アダプターは raw features を直接使用
-            encoded = self.shared_encoder(features)  # [batch, n_tf, seq_len, d_model]
+            # T5アダプターはマスク済み特徴量を使用
+            encoded = self.shared_encoder(masked_features)  # [batch, n_tf, seq_len, d_model]
         else:
             # 従来のSharedEncoder: TF-specific stem processing
             tf_embeddings = []
             for i in range(n_tf):
-                stem_out = self.tf_stems[i](features[:, i])  # [batch, seq_len, d_model]
+                stem_out = self.tf_stems[i](masked_features[:, i])  # [batch, seq_len, d_model]
                 tf_embeddings.append(stem_out)
                 
             tf_embeddings = torch.stack(tf_embeddings, dim=1)  # [batch, n_tf, seq_len, d_model]
             
             # Add positional encoding
-            pos_ids = torch.arange(seq_len, device=features.device).unsqueeze(0).expand(batch_size, -1)
+            pos_ids = torch.arange(seq_len, device=masked_features.device).unsqueeze(0).expand(batch_size, -1)
             pos_emb = self.pos_encoding(pos_ids).unsqueeze(1)  # [batch, 1, seq_len, d_model]
             tf_embeddings = tf_embeddings + pos_emb
             
@@ -391,7 +427,9 @@ class Stage1Model(nn.Module):
         
         return {
             'reconstructed': reconstructed,
-            'encoded': compressed
+            'encoded': compressed,
+            'masked_features': masked_features,
+            'training_masks': training_masks
         }
         
     def get_model_info(self) -> Dict:

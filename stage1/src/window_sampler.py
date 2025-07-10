@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-マルチTFウィンドウサンプラー
-同じカレンダーウィンドウを全TFからスライス・右端整列
+TF別ウィンドウサンプラー（リーク完全遮断版）
+SingleTFWindowSampler + MultiTFWindowSampler（ラッパー）
 """
 
 import pandas as pd
@@ -14,8 +14,177 @@ import hashlib
 from pathlib import Path
 warnings.filterwarnings('ignore')
 
+class SingleTFWindowSampler:
+    """単一TF用ウィンドウサンプラー（リーク防止・TF固有gap適用）"""
+    
+    def __init__(
+        self,
+        tf_name: str,
+        tf_data: pd.DataFrame,
+        seq_len: int,
+        split: str = "train",
+        val_split: float = 0.2,
+        min_coverage: float = 0.8,
+        cache_dir: Optional[str] = None,
+        val_gap_days: float = 1.0
+    ):
+        """
+        Args:
+            tf_name: タイムフレーム名 ('m1', 'm5', etc.)
+            tf_data: 単一TFのDataFrame
+            seq_len: このTFでのシーケンス長（M1基準から自動計算）
+            split: "train" or "val"
+            val_split: 検証データ割合
+            min_coverage: 最小データカバレッジ
+            cache_dir: キャッシュディレクトリ
+            val_gap_days: 訓練と検証の間の時間的ギャップ（日数）
+        """
+        self.tf_name = tf_name
+        self.tf_data = tf_data
+        self.split = split
+        self.val_split = val_split
+        self.min_coverage = min_coverage
+        self.cache_dir = Path(cache_dir) / "windows" if cache_dir else Path("./cache/windows")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.val_gap_days = val_gap_days
+        
+        # TF固有の設定
+        self.step_map = {
+            'm1': 1, 'm5': 5, 'm15': 15, 'm30': 30, 
+            'h1': 60, 'h4': 240, 'd': 1440
+        }
+        self.tf_step_minutes = self.step_map.get(tf_name, 1)
+        
+        # M1基準seq_lenをこのTFに合わせて変換
+        # M1=128なら、M5=128/5=25.6→26, H1=128/60=2.13→3
+        m1_duration_minutes = seq_len * 1  # M1は1分間隔
+        self.seq_len = max(1, int(m1_duration_minutes / self.tf_step_minutes))
+        
+        print(f"🔍 SingleTFWindowSampler({tf_name})")
+        print(f"   データ期間: {tf_data.index[0]} - {tf_data.index[-1]}")
+        print(f"   レコード数: {len(tf_data):,}")
+        print(f"   シーケンス長: {self.seq_len} (M1={seq_len}基準)")
+        print(f"   TF間隔: {self.tf_step_minutes}分")
+        
+        # 有効ウィンドウ検索
+        self.valid_windows = self._find_valid_windows()
+        
+        # 訓練/検証分割（TF固有gap適用）
+        self.split_windows = self._split_windows()
+        
+        print(f"   総ウィンドウ数: {len(self.valid_windows)}")
+        print(f"   {split}ウィンドウ数: {len(self.split_windows)}")
+        
+    def _find_valid_windows(self) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+        """単一TFでの有効ウィンドウを検索"""
+        n_windows = len(self.tf_data) - self.seq_len + 1
+        
+        if n_windows <= 0:
+            return []
+            
+        # キャッシュファイル名（TF固有）
+        data_hash = hashlib.md5(str(self.tf_data.index[[0, -1]]).encode()).hexdigest()[:8]
+        cache_file = self.cache_dir / f"windows_{data_hash}_{self.tf_name}.npy"
+        
+        if cache_file.exists():
+            print(f"   📂 キャッシュから読み込み: {cache_file.name}")
+            valid_indices = np.load(cache_file)
+        else:
+            print(f"   🔍 有効ウィンドウ検索中: {n_windows:,} 候補")
+            start_time = time.time()
+            
+            # 単純に連続データの存在をチェック
+            valid_indices = []
+            for i in range(n_windows):
+                start_idx = i
+                end_idx = i + self.seq_len
+                
+                # データ存在チェック（NaN以外）
+                window_data = self.tf_data.iloc[start_idx:end_idx]
+                valid_ratio = (~window_data.isna()).all(axis=1).mean()
+                
+                if valid_ratio >= self.min_coverage:
+                    start_time = self.tf_data.index[start_idx]
+                    end_time = self.tf_data.index[end_idx - 1]
+                    valid_indices.append((start_time, end_time))
+            
+            # キャッシュ保存
+            np.save(cache_file, valid_indices)
+            print(f"   💾 キャッシュ保存: {cache_file.name}")
+            print(f"   ⚡ 処理時間: {time.time() - start_time:.2f}秒")
+        
+        return valid_indices
+    
+    def _split_windows(self) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+        """TF固有gap適用での訓練/検証分割"""
+        n_total = len(self.valid_windows)
+        n_val = int(n_total * self.val_split)
+        
+        if n_val == 0:
+            return self.valid_windows if self.split == "train" else []
+        
+        # TF固有のgap計算
+        val_gap_minutes = int(self.val_gap_days * 24 * 60)
+        tf_gap_windows = int(val_gap_minutes / self.tf_step_minutes)
+        
+        print(f"   🕐 TF固有ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分")
+        print(f"   📊 {self.tf_name} gap窓数: {tf_gap_windows} ({self.tf_step_minutes}分間隔)")
+        
+        if self.split == "train":
+            # 訓練: 最後の (n_val + tf_gap_windows) を除外
+            return self.valid_windows[:-(n_val + tf_gap_windows)]
+        else:  # val
+            # 検証: 最後の n_val のみ使用
+            val_windows = self.valid_windows[-n_val:]
+            
+            if val_windows:
+                first_val_ts = val_windows[0][0]
+                print(f"   [DBG] {self.tf_name} 検証開始: {first_val_ts}")
+                
+                # ギャップ検証
+                if n_val + tf_gap_windows < len(self.valid_windows):
+                    last_train_window = self.valid_windows[-(n_val + tf_gap_windows) - 1]
+                    last_train_ts = last_train_window[1]
+                    gap_actual = (first_val_ts - last_train_ts).total_seconds() / 86400
+                    print(f"   [DBG] {self.tf_name} 実際ギャップ: {gap_actual:.1f}日")
+            
+            return val_windows
+    
+    def __len__(self) -> int:
+        return len(self.split_windows)
+    
+    def __getitem__(self, idx: int) -> pd.DataFrame:
+        """指定インデックスのウィンドウデータを取得"""
+        if idx >= len(self.split_windows):
+            raise IndexError(f"Index {idx} out of range for {len(self.split_windows)} windows")
+        
+        start_time, end_time = self.split_windows[idx]
+        
+        # 時間範囲でデータ取得
+        window_data = self.tf_data.loc[start_time:end_time]
+        
+        # 右端整列（最新のseq_len分を取得）
+        if len(window_data) > self.seq_len:
+            window_data = window_data.tail(self.seq_len)
+        elif len(window_data) < self.seq_len:
+            # パディング（前方をNaNで埋める）
+            padding_needed = self.seq_len - len(window_data)
+            padding_index = pd.date_range(
+                end=window_data.index[0] - pd.Timedelta(minutes=self.tf_step_minutes),
+                periods=padding_needed,
+                freq=f"{self.tf_step_minutes}min"
+            )
+            padding_df = pd.DataFrame(
+                np.nan, 
+                index=padding_index,
+                columns=window_data.columns
+            )
+            window_data = pd.concat([padding_df, window_data])
+        
+        return window_data
+
 class MultiTFWindowSampler:
-    """マルチTF同期ウィンドウサンプラー"""
+    """マルチTF同期ウィンドウサンプラー（ラッパー版・リーク完全遮断）"""
     
     def __init__(
         self,
@@ -45,379 +214,66 @@ class MultiTFWindowSampler:
         self.cache_dir = Path(cache_dir) if cache_dir else Path("./cache")
         self.val_gap_days = val_gap_days
         
-        # M1をベースとして使用
-        self.base_tf = 'm1'
-        if self.base_tf not in tf_data:
-            raise ValueError(f"ベースTF '{self.base_tf}' がデータに存在しません")
-            
-        # TFごとのステップ間隔（分）
-        self.step_map = {
-            'm1': 1,
-            'm5': 5, 
-            'm15': 15,
-            'm30': 30,
-            'h1': 60,
-            'h4': 240
-        }
-            
-        print(f"🔄 MultiTFWindowSampler初期化 ({split})")
+        # タイムフレーム名リスト
+        self.timeframes = list(tf_data.keys())
         
-        # キャッシュ機能
-        self.cache_dir.mkdir(exist_ok=True)
-        cache_hash = self._compute_cache_hash()
-        cache_file = self.cache_dir / f"windows_{cache_hash}.npy"
+        print(f"🔄 MultiTFWindowSampler初期化 ({split}) - ラッパー版")
+        print(f"   TF数: {len(self.timeframes)}")
+        print(f"   TF: {self.timeframes}")
         
-        # 有効ウィンドウ範囲を計算（キャッシュまたはベクトル化版）
-        start_time = time.time()
-        if cache_file.exists():
-            print(f"   📂 キャッシュからウィンドウ読み込み: {cache_file.name}")
-            valid_indices = np.load(cache_file)
-            self.valid_windows = self._indices_to_windows(valid_indices)
-        else:
-            print(f"   🔄 新規ウィンドウ計算中...")
-            self.valid_windows = self._find_valid_windows()
-            # キャッシュ保存
-            valid_indices = self._windows_to_indices(self.valid_windows)
-            np.save(cache_file, valid_indices)
-            print(f"   💾 ウィンドウキャッシュ保存: {cache_file.name}")
+        # 各TFに対してSingleTFWindowSamplerを作成
+        self.tf_samplers = {}
+        sample_counts = []
+        valid_timeframes = []
         
-        elapsed_time = time.time() - start_time
-        print(f"   ⚡ ウィンドウ処理時間: {elapsed_time:.2f}秒")
-        
-        # 訓練/検証分割
-        self.split_windows = self._split_windows()
-        
-        print(f"   総ウィンドウ数: {len(self.valid_windows)}")
-        print(f"   {split}ウィンドウ数: {len(self.split_windows)}")
-        
-    def _find_valid_windows(self) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
-        """全TFでデータが十分存在する有効ウィンドウを発見（ベクトル化版）"""
-        
-        base_df = self.tf_data[self.base_tf]
-        n_windows = len(base_df) - self.seq_len + 1
-        
-        if n_windows <= 0:
-            return []
-            
-        print(f"   ベクトル化ウィンドウ探索開始: {n_windows:,} 候補")
-        
-        # 各TFのカバレッジをベクトル計算
-        all_valid = np.ones(n_windows, dtype=bool)
-        
-        for tf_name, df in self.tf_data.items():
-            # このTFの有効データマスクを作成
-            tf_valid = self._compute_tf_coverage_vectorized(
-                base_df, df, tf_name
+        for tf_name, tf_df in tf_data.items():
+            sampler = SingleTFWindowSampler(
+                tf_name=tf_name,
+                tf_data=tf_df,
+                seq_len=seq_len,
+                split=split,
+                val_split=val_split,
+                min_coverage=min_coverage,
+                cache_dir=str(self.cache_dir),
+                val_gap_days=val_gap_days
             )
-            all_valid &= tf_valid
             
-            valid_count = np.sum(tf_valid)
-            print(f"     {tf_name}: {valid_count:,}/{n_windows:,} ウィンドウが有効")
-        
-        # 有効なウィンドウのインデックスを取得
-        valid_indices = np.where(all_valid)[0]
-        
-        # タイムスタンプペアに変換
-        valid_windows = []
-        for idx in valid_indices:
-            start_time = base_df.index[idx]
-            end_time = base_df.index[idx + self.seq_len - 1]
-            valid_windows.append((start_time, end_time))
-            
-        final_count = len(valid_windows)
-        print(f"   ベクトル化探索完了: {final_count:,} 有効ウィンドウ")
-        
-        # 性能統計
-        if n_windows > 0:
-            efficiency = (final_count / n_windows) * 100
-            print(f"   データ効率: {efficiency:.1f}% ({final_count:,}/{n_windows:,})")
-        
-        return valid_windows
-        
-    def _compute_tf_coverage_vectorized(self, base_df: pd.DataFrame, tf_df: pd.DataFrame, tf_name: str) -> np.ndarray:
-        """特定TFのカバレッジをベクトル計算"""
-        
-        n_windows = len(base_df) - self.seq_len + 1
-        
-        if tf_name == self.base_tf:
-            # M1は全ウィンドウで有効（既にサイズ確認済み）
-            return np.ones(n_windows, dtype=bool)
-            
-        # このTFに必要な最小データ点数を計算
-        window_duration_min = self.seq_len - 1  # M1分単位での期間
-        tf_intervals = {
-            'm1': 1, 'm5': 5, 'm15': 15, 'm30': 30, 
-            'h1': 60, 'h4': 240, 'd': 1440
-        }
-        interval = tf_intervals[tf_name]
-        expected_len = max(1, int(window_duration_min / interval) + 1)
-        min_required = int(expected_len * self.min_coverage)
-        
-        # ベクトル化で全ウィンドウのデータ数を一括計算
-        try:
-            # タイムゾーン統一 - 両方をtz-naiveに変換
-            base_index = base_df.index
-            tf_index = tf_df.index
-            
-            # tz-awareの場合はUTCに変換してからtz-naiveに
-            if hasattr(base_index, 'tz') and base_index.tz is not None:
-                base_index = base_index.tz_convert('UTC').tz_localize(None)
-            if hasattr(tf_index, 'tz') and tf_index.tz is not None:
-                tf_index = tf_index.tz_convert('UTC').tz_localize(None)
-            
-            # ウィンドウ開始時刻配列を作成
-            start_times = base_index[:n_windows].values
-            end_times = base_index[self.seq_len-1:self.seq_len-1+n_windows].values
-            
-            # ベクトル化された検索でデータ数を計算
-            start_indices = tf_index.searchsorted(start_times, side='left')
-            end_indices = tf_index.searchsorted(end_times, side='right')
-            
-            # 各ウィンドウのデータ数を計算
-            data_counts = end_indices - start_indices
-            
-            # 闾値以上のウィンドウを特定
-            valid_mask = data_counts >= min_required
-            
-        except Exception as e:
-            # フォールバック: バッチ処理で計算
-            print(f"     フォールバックモードで{tf_name}を処理: {str(e)}")
-            valid_mask = np.zeros(n_windows, dtype=bool)
-            
-            batch_size = 10000
-            for batch_start in range(0, n_windows, batch_size):
-                batch_end = min(batch_start + batch_size, n_windows)
-                
-                for i in range(batch_start, batch_end):
-                    start_time = base_df.index[i]
-                    end_time = base_df.index[i + self.seq_len - 1]
-                    
-                    # タイムゾーン統一
-                    if hasattr(start_time, 'tz') and start_time.tz is not None:
-                        start_time = start_time.tz_convert('UTC').tz_localize(None)
-                    if hasattr(end_time, 'tz') and end_time.tz is not None:
-                        end_time = end_time.tz_convert('UTC').tz_localize(None)
-                    
-                    # tf_indexも統一
-                    tf_index_safe = tf_df.index
-                    if hasattr(tf_index_safe, 'tz') and tf_index_safe.tz is not None:
-                        tf_index_safe = tf_index_safe.tz_convert('UTC').tz_localize(None)
-                    
-                    start_idx = tf_index_safe.searchsorted(start_time, side='left')
-                    end_idx = tf_index_safe.searchsorted(end_time, side='right')
-                    
-                    data_count = end_idx - start_idx
-                    valid_mask[i] = data_count >= min_required
-                    
-        return valid_mask
-    
-    def _check_coverage(self, start_time: pd.Timestamp, end_time: pd.Timestamp) -> bool:
-        """指定期間での全TFデータカバレッジをチェック（旧実装・レガシー用）"""
-        
-        for tf_name, df in self.tf_data.items():
-            # この期間のデータを取得
-            window_data = df.loc[start_time:end_time]
-            
-            if tf_name == self.base_tf:
-                # M1は正確に seq_len 必要
-                expected_len = self.seq_len
+            # 🔥 有効なサンプラーのみ保持（IndexError回避）
+            if len(sampler) > 0:
+                self.tf_samplers[tf_name] = sampler
+                sample_counts.append(len(sampler))
+                valid_timeframes.append(tf_name)
+                print(f"   ✅ {tf_name}: {len(sampler):,} windows")
             else:
-                # 他のTFは期間に応じた期待長を計算
-                expected_len = self._calculate_expected_length(tf_name, start_time, end_time)
-                
-            # カバレッジチェック
-            if len(window_data) < expected_len * self.min_coverage:
-                return False
-                
-        return True
+                print(f"   ❌ {tf_name}: サンプル数0 - 除外")
         
-    def _calculate_expected_length(self, tf_name: str, start_time: pd.Timestamp, end_time: pd.Timestamp) -> int:
-        """TFと期間に基づく期待データ長を計算"""
+        # 有効なTFリストを更新
+        self.timeframes = valid_timeframes
         
-        # 期間の長さ（分）
-        duration_minutes = (end_time - start_time).total_seconds() / 60
+        # 最小サンプル数を安全に計算
+        self.min_samples = min(sample_counts) if sample_counts else 0
         
-        # TFごとの間隔（分）
-        tf_intervals = {
-            'm1': 1,
-            'm5': 5,
-            'm15': 15,
-            'm30': 30,
-            'h1': 60,
-            'h4': 240,
-            'd': 1440
-        }
+        if self.min_samples == 0:
+            raise ValueError("全TFでサンプル数0 - データローダーを作成できません")
         
-        interval = tf_intervals[tf_name]
-        expected_len = int(duration_minutes / interval) + 1
-        
-        return max(1, expected_len)  # 最低1データポイント
-        
-    def _split_windows(self) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
-        """訓練/検証分割（時間的ギャップ付き）"""
-        
-        n_total = len(self.valid_windows)
-        n_val = int(n_total * self.val_split)
-        
-        # val_gap_days を分単位に変換
-        val_gap_minutes = int(self.val_gap_days * 24 * 60)
-        
-        # ベースTF（M1）の固定間隔を使用してギャップ計算
-        base_step_minutes = self.step_map[self.base_tf]  # M1 = 1分
-        gap_windows = int(val_gap_minutes / base_step_minutes)
-        
-        if n_val == 0:
-            return self.valid_windows if self.split == "train" else []
-            
-        # ギャップを考慮した分割（修正版）
-        if self.split == "train":
-            print(f"   🕐 時間的ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分 = {gap_windows}窓 (ベース間隔={base_step_minutes}分)")
-            
-            # TF別ギャップ窓数の表示（設計確認用）
-            print(f"   🔍 TF別ギャップ窓数:")
-            for tf_name in ['m1', 'm5', 'm15', 'm30', 'h1', 'h4']:
-                if tf_name in self.step_map:
-                    tf_step = self.step_map[tf_name]
-                    tf_gap_windows = int(val_gap_minutes / tf_step)
-                    print(f"     {tf_name}: {tf_gap_windows}窓 ({tf_step}分間隔)")
-            
-            # TF毎のギャップを考慮した訓練データ分割
-            # 注意: 現在は全TF共通のvalid_windowsを使用しているため、
-            # 最も制限の厳しい（最大の）gap_windowsを使用
-            max_gap_windows = gap_windows  # M1ベース（最大値）
-            for tf_name in self.step_map:
-                tf_step = self.step_map[tf_name]
-                tf_gap_windows = int(val_gap_minutes / tf_step)
-                max_gap_windows = max(max_gap_windows, tf_gap_windows)
-            
-            print(f"   📊 適用ギャップ窓数: {max_gap_windows} (全TF中の最大値)")
-            
-            # 訓練: 最後の (n_val + max_gap_windows) を除外
-            return self.valid_windows[:-(n_val + max_gap_windows)]
-        else:  # val
-            # 検証: 最後の n_val のみ使用（gapの後から）
-            val_windows = self.valid_windows[-n_val:]
-            
-            # デバッグ出力：検証データの最初のタイムスタンプを表示
-            if val_windows:
-                first_val_ts = val_windows[0][0]  # (start_time, end_time)のstart_time
-                print(f"   [DBG] 検証データ開始時刻: {first_val_ts}")
-                print(f"   [DBG] 計算されたギャップ窓数: {gap_windows} (ベース間隔={base_step_minutes}分)")
-                
-                # 訓練データの最後のタイムスタンプも表示
-                if n_val + gap_windows < len(self.valid_windows):
-                    last_train_window = self.valid_windows[-(n_val + gap_windows) - 1]
-                    last_train_ts = last_train_window[1]  # end_time
-                    gap_actual = (first_val_ts - last_train_ts).total_seconds() / 86400  # 日数
-                    print(f"   [DBG] 訓練データ終了時刻: {last_train_ts}")
-                    print(f"   [DBG] 実際のギャップ: {gap_actual:.1f}日")
-                else:
-                    print(f"   [DBG] 警告: ギャップ計算で範囲外アクセス (n_val={n_val}, gap_windows={gap_windows}, total={len(self.valid_windows)})")
-                    
-            return val_windows
-            
+        print(f"📊 MultiTFWindowSampler統計:")
+        print(f"   有効TF数: {len(self.timeframes)}")
+        print(f"   有効TF: {self.timeframes}")
+        print(f"   最小サンプル数: {self.min_samples:,}")
+    
     def __len__(self) -> int:
-        """サンプル数"""
-        return len(self.split_windows)
-        
+        """最小サンプル数を返す（全TFで同期）"""
+        return self.min_samples
+    
     def __getitem__(self, idx: int) -> Dict[str, pd.DataFrame]:
-        """
-        指定インデックスのマルチTFウィンドウを取得
+        """全TFの同期ウィンドウデータを取得"""
+        if idx >= self.min_samples:
+            raise IndexError(f"Index {idx} out of range for {self.min_samples} synchronized windows")
         
-        Returns:
-            Dict[tf_name, DataFrame]: 各TFのウィンドウデータ
-        """
-        if idx >= len(self.split_windows):
-            raise IndexError(f"Index {idx} out of range (max: {len(self.split_windows)-1})")
-            
-        start_time, end_time = self.split_windows[idx]
+        # 各TFからウィンドウデータを取得
+        tf_windows = {}
+        for tf_name in self.timeframes:
+            sampler = self.tf_samplers[tf_name]
+            tf_windows[tf_name] = sampler[idx]
         
-        window_data = {}
-        
-        for tf_name, df in self.tf_data.items():
-            # 期間データを取得
-            tf_window = df.loc[start_time:end_time].copy()
-            
-            if tf_name == self.base_tf:
-                # M1は正確に seq_len にリサンプル（必要に応じて）
-                if len(tf_window) != self.seq_len:
-                    # 時間インデックスで補間してseq_len長にする
-                    tf_window = self._resample_to_length(tf_window, self.seq_len, start_time, end_time)
-                    
-            window_data[tf_name] = tf_window
-            
-        return window_data
-        
-    def _resample_to_length(
-        self, 
-        df: pd.DataFrame, 
-        target_len: int, 
-        start_time: pd.Timestamp, 
-        end_time: pd.Timestamp
-    ) -> pd.DataFrame:
-        """DataFrameを指定長にリサンプル"""
-        
-        # 等間隔時間インデックス作成
-        time_index = pd.date_range(start=start_time, end=end_time, periods=target_len)
-        
-        # OHLCデータの適切なリサンプリング
-        resampled = df.reindex(time_index, method='nearest')
-        
-        # 欠損値を前方埋め
-        resampled = resampled.fillna(method='ffill').fillna(method='bfill')
-        
-        return resampled
-        
-    def get_sample_window_info(self, idx: int = 0) -> Dict:
-        """サンプルウィンドウの情報を取得（デバッグ用）"""
-        
-        if len(self.split_windows) == 0:
-            return {"error": "No valid windows"}
-            
-        start_time, end_time = self.split_windows[idx]
-        window_data = self[idx]
-        
-        info = {
-            "window_index": idx,
-            "start_time": start_time,
-            "end_time": end_time,
-            "duration_hours": (end_time - start_time).total_seconds() / 3600,
-            "tf_lengths": {tf: len(data) for tf, data in window_data.items()}
-        }
-        
-        return info
-    
-    def _compute_cache_hash(self) -> str:
-        """キャッシュ用ハッシュ計算"""
-        # データの特性に基づくハッシュ生成
-        base_df = self.tf_data[self.base_tf]
-        hash_data = f"{len(base_df)}_{self.seq_len}_{self.min_coverage}"
-        
-        # データの開始・終了時刻も含める
-        hash_data += f"_{base_df.index[0]}_{base_df.index[-1]}"
-        
-        return hashlib.md5(hash_data.encode()).hexdigest()[:8]
-    
-    def _windows_to_indices(self, windows: List[Tuple]) -> np.ndarray:
-        """ウィンドウリストをインデックス配列に変換"""
-        base_df = self.tf_data[self.base_tf]
-        indices = []
-        
-        for start_time, end_time in windows:
-            # 開始時刻のインデックスを取得
-            start_idx = base_df.index.get_loc(start_time)
-            indices.append(start_idx)
-            
-        return np.array(indices, dtype=np.int32)
-    
-    def _indices_to_windows(self, indices: np.ndarray) -> List[Tuple]:
-        """インデックス配列をウィンドウリストに変換"""
-        base_df = self.tf_data[self.base_tf]
-        windows = []
-        
-        for idx in indices:
-            start_time = base_df.index[idx]
-            end_time = base_df.index[idx + self.seq_len - 1]
-            windows.append((start_time, end_time))
-            
-        return windows
+        return tf_windows
