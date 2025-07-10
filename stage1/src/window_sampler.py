@@ -262,15 +262,15 @@ class MultiTFWindowSampler:
         # val_gap_days を分単位に変換
         val_gap_minutes = int(self.val_gap_days * 24 * 60)
         
+        # TFごとにステップ長が異なるので最大ステップ(H4=240分)で窓数に変換
+        max_step = max(self.step_map.values())  # 240分 (H4)
+        gap_windows = val_gap_minutes // max_step  # 30日 * 24 * 60 / 240 = 180窓
+        
         if n_val == 0:
             return self.valid_windows if self.split == "train" else []
             
         # ギャップを考慮した分割（修正版）
         if self.split == "train":
-            # TFごとにステップ長が異なるので最大ステップ(H4=240分)で窓数に変換
-            max_step = max(self.step_map.values())  # 240分 (H4)
-            gap_windows = val_gap_minutes // max_step  # 30日 * 24 * 60 / 240 = 180窓
-            
             print(f"   🕐 時間的ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分 = {gap_windows}窓 (max_step={max_step}分)")
             
             # 訓練: 最後の (n_val + gap_windows) を除外
