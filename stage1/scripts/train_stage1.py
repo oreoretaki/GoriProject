@@ -838,6 +838,14 @@ def main():
             # 新しいモデルとトレーナーを作成
             model = Stage1LightningModule(config)
             
+            # freeze_epochs=0の場合は即座にT5を解凍
+            freeze_epochs = config.get('transfer_learning', {}).get('freeze_lm_epochs', 0)
+            if freeze_epochs == 0 and hasattr(model.model, 'shared_encoder') and hasattr(model.model.shared_encoder, 't5_encoder'):
+                # T5パラメータを即座に解凍
+                for param in model.model.shared_encoder.t5_encoder.parameters():
+                    param.requires_grad = True
+                print(f"🔓 シード{seed}: T5を即時解凍済み (freeze_epochs=0)")
+            
             # 各シード用のコールバックとロガーを作成
             seed_checkpoint_callback = ModelCheckpoint(
                 dirpath=Path(args.config).parent.parent / 'checkpoints' / f'seed_{seed}',
@@ -873,7 +881,7 @@ def main():
                 'max_epochs': config['training']['epochs'],
                 'devices': 1 if torch.cuda.is_available() and args.devices > 0 else 'auto',
                 'accelerator': 'gpu' if torch.cuda.is_available() and args.devices > 0 else 'cpu',
-                'callbacks': [seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress],
+                'callbacks': [seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress] + ([gradual_unfreezing] if T5_CALLBACKS_AVAILABLE and gradual_unfreezing else []),
                 'logger': seed_logger,
                 'precision': config['training']['precision'],
                 'gradient_clip_val': config['training']['gradient_clip'],
