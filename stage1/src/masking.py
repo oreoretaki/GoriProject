@@ -64,11 +64,11 @@ class MaskingStrategy:
         if eval_mask_ratio_override is not None:
             effective_mask_ratio = eval_mask_ratio_override
             
-        # バッチサイズに応じてマスクの形状を決定
+        # バッチサイズに応じてマスクの形状を決定（featuresと同じデバイスに配置）
         if features.dim() == 4:
-            masks = torch.zeros(batch_size, n_tf, seq_len)
+            masks = torch.zeros(batch_size, n_tf, seq_len, device=features.device, dtype=torch.float32)
         else:
-            masks = torch.zeros(n_tf, seq_len)
+            masks = torch.zeros(n_tf, seq_len, device=features.device, dtype=torch.float32)
         
         if self.sync_across_tf:
             # TF間同期マスキング: M1ベースでマスクを生成し、他のTFに適用
@@ -76,12 +76,14 @@ class MaskingStrategy:
             
             if features.dim() == 4:
                 # バッチ処理
+                base_mask = base_mask.to(features.device)
                 for b in range(batch_size):
                     for i in range(n_tf):
                         tf_mask = self._adapt_mask_to_tf(base_mask, features[b, i], seq_len)
                         masks[b, i] = tf_mask
             else:
                 # 単一サンプル処理
+                base_mask = base_mask.to(features.device)
                 for i in range(n_tf):
                     tf_mask = self._adapt_mask_to_tf(base_mask, features[i], seq_len)
                     masks[i] = tf_mask
@@ -92,12 +94,14 @@ class MaskingStrategy:
                 for b in range(batch_size):
                     for i in range(n_tf):
                         tf_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
+                        tf_mask = tf_mask.to(features.device)
                         tf_mask = self._adapt_mask_to_tf(tf_mask, features[b, i], seq_len)
                         masks[b, i] = tf_mask
             else:
                 # 単一サンプル処理
                 for i in range(n_tf):
                     tf_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
+                    tf_mask = tf_mask.to(features.device)
                     tf_mask = self._adapt_mask_to_tf(tf_mask, features[i], seq_len)
                     masks[i] = tf_mask
                 
