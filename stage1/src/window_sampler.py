@@ -137,7 +137,7 @@ class SingleTFWindowSampler:
             # 検証: 最後の n_val のみ使用
             val_windows = self.valid_windows[-n_val:]
             
-            if val_windows:
+            if len(val_windows) > 0:
                 first_val_ts = val_windows[0][0]
                 print(f"   [DBG] {self.tf_name} 検証開始: {first_val_ts}")
                 
