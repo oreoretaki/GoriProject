@@ -104,9 +104,9 @@ class SingleTFWindowSampler:
                 valid_ratio = (~window_data.isna()).all(axis=1).mean()
                 
                 if valid_ratio >= self.min_coverage:
-                    start_time = self.tf_data.index[start_idx]
-                    end_time = self.tf_data.index[end_idx - 1]
-                    valid_indices.append((start_time, end_time))
+                    start_ts = self.tf_data.index[start_idx]
+                    end_ts = self.tf_data.index[end_idx - 1]
+                    valid_indices.append((start_ts, end_ts))
             
             # キャッシュ保存
             np.save(cache_file, valid_indices)
