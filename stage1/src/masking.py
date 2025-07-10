@@ -50,30 +50,56 @@ class MaskingStrategy:
         if seed is not None:
             self.rng.seed(seed)
             
-        n_tf, seq_len, n_features = features.shape
+        # featuresの形状を確認: [batch, n_tf, seq_len, n_features] または [n_tf, seq_len, n_features]
+        if features.dim() == 4:
+            batch_size, n_tf, seq_len, n_features = features.shape
+        elif features.dim() == 3:
+            n_tf, seq_len, n_features = features.shape
+            batch_size = 1
+        else:
+            raise ValueError(f"Unexpected features shape: {features.shape}")
         
         # 評価時のマスク率オーバーライド処理
         effective_mask_ratio = self.mask_ratio
         if eval_mask_ratio_override is not None:
             effective_mask_ratio = eval_mask_ratio_override
             
-        masks = torch.zeros(n_tf, seq_len)
+        # バッチサイズに応じてマスクの形状を決定
+        if features.dim() == 4:
+            masks = torch.zeros(batch_size, n_tf, seq_len)
+        else:
+            masks = torch.zeros(n_tf, seq_len)
         
         if self.sync_across_tf:
             # TF間同期マスキング: M1ベースでマスクを生成し、他のTFに適用
             base_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
             
-            for i in range(n_tf):
-                # 各TFの実際の長さに応じてマスクを調整
-                tf_mask = self._adapt_mask_to_tf(base_mask, features[i], seq_len)
-                masks[i] = tf_mask
+            if features.dim() == 4:
+                # バッチ処理
+                for b in range(batch_size):
+                    for i in range(n_tf):
+                        tf_mask = self._adapt_mask_to_tf(base_mask, features[b, i], seq_len)
+                        masks[b, i] = tf_mask
+            else:
+                # 単一サンプル処理
+                for i in range(n_tf):
+                    tf_mask = self._adapt_mask_to_tf(base_mask, features[i], seq_len)
+                    masks[i] = tf_mask
         else:
             # TF個別マスキング
-            for i in range(n_tf):
-                tf_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
-                # 各TFの実際の長さに応じて調整
-                tf_mask = self._adapt_mask_to_tf(tf_mask, features[i], seq_len)
-                masks[i] = tf_mask
+            if features.dim() == 4:
+                # バッチ処理
+                for b in range(batch_size):
+                    for i in range(n_tf):
+                        tf_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
+                        tf_mask = self._adapt_mask_to_tf(tf_mask, features[b, i], seq_len)
+                        masks[b, i] = tf_mask
+            else:
+                # 単一サンプル処理
+                for i in range(n_tf):
+                    tf_mask = self._generate_single_mask(seq_len, effective_mask_ratio)
+                    tf_mask = self._adapt_mask_to_tf(tf_mask, features[i], seq_len)
+                    masks[i] = tf_mask
                 
         return masks
         
