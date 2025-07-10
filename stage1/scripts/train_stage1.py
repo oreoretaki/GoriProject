@@ -139,6 +139,17 @@ class Stage1LightningModule(pl.LightningModule):
         targets = batch['targets']    # [batch, n_tf, seq_len, 4]
         masks = batch['masks']        # [batch, n_tf, seq_len]
         
+        # T5勾配フローチェック（最初の数ステップのみ）
+        if batch_idx < 3:
+            t5_encoder = self.model.shared_encoder.t5_encoder
+            sample_param = t5_encoder.block[0].layer[0].SelfAttention.q.weight
+            print(f"   [T5 DBG] Step {batch_idx}: requires_grad={sample_param.requires_grad}")
+            if sample_param.grad is not None:
+                grad_norm = sample_param.grad.abs().sum().item()
+                print(f"   [T5 DBG] Step {batch_idx}: grad_norm={grad_norm:.6f}")
+            else:
+                print(f"   [T5 DBG] Step {batch_idx}: grad=None")
+        
         # Forward pass
         outputs = self.model(features, masks)
         reconstructed = outputs['reconstructed']
@@ -375,27 +386,6 @@ class Stage1LightningModule(pl.LightningModule):
             self.log('val_corr_mean', val_corr_mean, 
                      on_step=False, on_epoch=True, prog_bar=True, logger=False)
     
-    def on_after_backward(self):
-        """勾配計算後：TensorBoardに勾配ヒストグラムを記録"""
-        # ヒストグラム記録を一時的に無効化（empty histogram エラー回避）
-        # 重要なレイヤーの勾配ノルムのみ記録
-        if hasattr(self.model, 'shared_encoder'):
-            # エンコーダーの勾配ノルム
-            encoder_grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.shared_encoder.parameters(), 
-                float('inf')
-            )
-            self.log('grad_norm/encoder', encoder_grad_norm, on_step=True, on_epoch=False)
-        
-        # T5使用時はT5部分の勾配ノルムも記録
-        if (hasattr(self.model, 'shared_encoder') and 
-            hasattr(self.model.shared_encoder, 't5_encoder')):
-            t5_grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.shared_encoder.t5_encoder.parameters(), 
-                float('inf')
-            )
-            self.log('grad_norm/t5', t5_grad_norm, on_step=True, on_epoch=False)
-    
     def on_train_epoch_end(self):
         """エポック終了時のAMPスケール変化ログ"""
         if (hasattr(self.trainer, 'precision_plugin') and 
@@ -409,10 +399,6 @@ class Stage1LightningModule(pl.LightningModule):
                 if scale_change < 0.5:
                     print(f"⚠️ AMPスケールが大幅に減少: {self._amp_scale_start:.1f} → {current_scale:.1f}")
     
-    def test_step(self, batch, batch_idx):
-        """テストステップ（検証ステップと同じ）"""
-        return self.validation_step(batch, batch_idx)
-        
     def configure_optimizers(self):
         """オプティマイザーとスケジューラー設定（T5 Layerwise LR Decay対応）"""
         

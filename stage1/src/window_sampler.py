@@ -262,23 +262,16 @@ class MultiTFWindowSampler:
         # val_gap_days を分単位に変換
         val_gap_minutes = int(self.val_gap_days * 24 * 60)
         
-        # valid_windowsの実際の時間間隔を計算
-        if len(self.valid_windows) >= 2:
-            first_window = self.valid_windows[0]
-            second_window = self.valid_windows[1]
-            actual_step_minutes = (second_window[0] - first_window[0]).total_seconds() / 60
-            gap_windows = int(val_gap_minutes / actual_step_minutes)
-        else:
-            # フォールバック: M1ベース（1分間隔）として計算
-            actual_step_minutes = 1.0
-            gap_windows = val_gap_minutes
+        # ベースTF（M1）の固定間隔を使用してギャップ計算
+        base_step_minutes = self.step_map[self.base_tf]  # M1 = 1分
+        gap_windows = int(val_gap_minutes / base_step_minutes)
         
         if n_val == 0:
             return self.valid_windows if self.split == "train" else []
             
         # ギャップを考慮した分割（修正版）
         if self.split == "train":
-            print(f"   🕐 時間的ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分 = {gap_windows}窓 (実際間隔={actual_step_minutes:.1f}分)")
+            print(f"   🕐 時間的ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分 = {gap_windows}窓 (ベース間隔={base_step_minutes}分)")
             
             # 訓練: 最後の (n_val + gap_windows) を除外
             return self.valid_windows[:-(n_val + gap_windows)]
@@ -290,7 +283,7 @@ class MultiTFWindowSampler:
             if val_windows:
                 first_val_ts = val_windows[0][0]  # (start_time, end_time)のstart_time
                 print(f"   [DBG] 検証データ開始時刻: {first_val_ts}")
-                print(f"   [DBG] 計算されたギャップ窓数: {gap_windows} (間隔={actual_step_minutes:.1f}分)")
+                print(f"   [DBG] 計算されたギャップ窓数: {gap_windows} (ベース間隔={base_step_minutes}分)")
                 
                 # 訓練データの最後のタイムスタンプも表示
                 if n_val + gap_windows < len(self.valid_windows):
