@@ -142,7 +142,8 @@ class Stage1LightningModule(pl.LightningModule):
         # T5勾配フローチェック（最初の数ステップのみ）
         if batch_idx < 3:
             t5_encoder = self.model.shared_encoder.t5_encoder
-            sample_param = t5_encoder.block[0].layer[0].SelfAttention.q.weight
+            # T5EncoderModelの正しい構造を使用
+            sample_param = t5_encoder.encoder.block[0].layer[0].SelfAttention.q.weight
             print(f"   [T5 DBG] Step {batch_idx}: requires_grad={sample_param.requires_grad}")
             if sample_param.grad is not None:
                 grad_norm = sample_param.grad.abs().sum().item()
