@@ -88,7 +88,7 @@ class SingleTFWindowSampler:
         
         if cache_file.exists():
             print(f"   📂 キャッシュから読み込み: {cache_file.name}")
-            valid_indices = np.load(cache_file)
+            valid_indices = np.load(cache_file, allow_pickle=True)
         else:
             print(f"   🔍 有効ウィンドウ検索中: {n_windows:,} 候補")
             start_time = time.time()
