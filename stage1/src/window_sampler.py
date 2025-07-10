@@ -273,6 +273,14 @@ class MultiTFWindowSampler:
         if self.split == "train":
             print(f"   🕐 時間的ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分 = {gap_windows}窓 (ベース間隔={base_step_minutes}分)")
             
+            # TF別ギャップ窓数の表示（設計確認用）
+            print(f"   🔍 TF別ギャップ窓数:")
+            for tf_name in ['m1', 'm5', 'm15', 'm30', 'h1', 'h4']:
+                if tf_name in self.step_map:
+                    tf_step = self.step_map[tf_name]
+                    tf_gap_windows = int(val_gap_minutes / tf_step)
+                    print(f"     {tf_name}: {tf_gap_windows}窓 ({tf_step}分間隔)")
+            
             # 訓練: 最後の (n_val + gap_windows) を除外
             return self.valid_windows[:-(n_val + gap_windows)]
         else:  # val
