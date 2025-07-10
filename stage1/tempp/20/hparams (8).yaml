@@ -92,10 +92,13 @@ augmentation:
     probability: 0.0
 validation:
   val_split: 0.2
+  val_gap_days: 60.0
   metrics:
   - correlation_per_tf
   - consistency_ratio
   - spectral_delta
+evaluation:
+  eval_mask_ratio: null
 logging:
   log_every_n_steps: 10
   checkpoint_every_n_epochs: 1
@@ -111,8 +114,8 @@ dataloader:
   persistent_workers: true
   prefetch_factor: 6
 development:
-  limit_train_batches: 4850
-  limit_val_batches: 970
+  limit_train_batches: 2383
+  limit_val_batches: 606
 lr_finder:
   enabled: false
   min_lr: '1e-8'
