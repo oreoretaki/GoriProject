@@ -30,6 +30,12 @@ torch.set_float32_matmul_precision('high')
 # TF32を有効化（RTX 30xx/40xx/A100で高速化）
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
+
+# TorchDynamo最適化（スカラー出力キャプチャ有効化）
+if hasattr(torch, '_dynamo'):
+    torch._dynamo.config.capture_scalar_outputs = True
+    print("✅ TorchDynamo スカラー出力キャプチャ有効化")
+
 print("✅ TF32とTensor Core最適化を有効化")
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor, TQDMProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
