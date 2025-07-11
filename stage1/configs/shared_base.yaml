@@ -110,14 +110,6 @@ normalization:
   method: "zscore"
   per_tf: true
 
-# T5転移学習設定
-transfer_learning:
-  use_pretrained_lm: true
-  lm_name_or_path: "google/t5-v1_1-base"
-  freeze_lm: false
-  differential_lr: true
-  lm_lr_scale: 0.1
-
 # ロス設定（統一）
 loss:
   weights:
