@@ -508,8 +508,18 @@ def create_differential_learning_rate_groups(model, base_lr: float, t5_lr_factor
     param_groups = []
     other_params = []
     
+    # T5アダプターの検出（共有エンコーダーを優先）
+    t5_encoder = None
     if hasattr(model, 'shared_encoder') and isinstance(model.shared_encoder, T5TimeSeriesAdapter):
         t5_encoder = model.shared_encoder.t5_encoder
+    elif hasattr(model, 'encoders') and isinstance(model.encoders, nn.ModuleDict):
+        # async_samplerモードでのフォールバック（非T5モード）
+        for tf, encoder in model.encoders.items():
+            if isinstance(encoder, T5TimeSeriesAdapter):
+                t5_encoder = encoder.t5_encoder
+                break
+    
+    if t5_encoder is not None:
         
         # Layerwise LR Decayが指定された場合
         if layerwise_lr_decay is not None and t5_lr_top is not None:

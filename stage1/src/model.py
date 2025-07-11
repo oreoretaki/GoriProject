@@ -420,14 +420,9 @@ class Stage1Model(nn.Module):
                     "T5転移学習が有効化されていますが、lm_adapterまたはtransformersライブラリが利用できません。"
                     "pip install transformers>=4.42.0 でインストールしてください。"
                 )
-            print("🤗 T5転移学習を使用します")
-            if self.async_sampler:
-                # TF-specific encoders for async mode
-                self.encoders = nn.ModuleDict({
-                    tf: T5TimeSeriesAdapter(config) for tf in self.timeframes
-                })
-            else:
-                self.shared_encoder = T5TimeSeriesAdapter(config)
+            print("🤗 T5転移学習を使用します（共有エンコーダー）")
+            # 🔥 T5エンコーダーは常に共有（async_samplerモードでも）
+            self.shared_encoder = T5TimeSeriesAdapter(config)
         else:
             print("📦 従来のSharedEncoderを使用します")
             if self.async_sampler:
@@ -531,8 +526,13 @@ class Stage1Model(nn.Module):
             # TF-specific stem processing (after masking)
             x_stem = self.tf_stems[tf](x_masked_input)  # [B, L, d_model]
             
-            # TF-specific encoder
-            encoded_features = self.encoders[tf](x_stem, key_padding_mask=mask)
+            # TF-specific encoder または 共有エンコーダー
+            if hasattr(self, 'shared_encoder'):
+                # T5または共有エンコーダーを使用
+                encoded_features = self.shared_encoder(x_stem, key_padding_mask=mask)
+            else:
+                # TF固有エンコーダーを使用（非T5モード）
+                encoded_features = self.encoders[tf](x_stem, key_padding_mask=mask)
             encoded[tf] = encoded_features  # [B, L, d_model]
             padding_masks[tf] = mask
         
