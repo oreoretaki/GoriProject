@@ -54,32 +54,8 @@ class Stage1Lightning(LightningModule):
         # Simple optimizer for profiling
         return torch.optim.Adam(self.parameters(), lr=1e-3)
 
-def profile_training(config_path: str, data_dir: str):
-    """Profile training to identify bottlenecks"""
-    
-    # Load configuration
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Handle config inheritance
-    if 'extends' in config:
-        base_config_path = Path(config_path).parent / config['extends']
-        with open(base_config_path, 'r') as f:
-            base_config = yaml.safe_load(f)
-        
-        # Handle nested inheritance
-        if 'extends' in base_config:
-            root_config_path = Path(config_path).parent / base_config['extends']
-            with open(root_config_path, 'r') as f:
-                root_config = yaml.safe_load(f)
-            root_config.update(base_config)
-            base_config = root_config
-            
-        base_config.update(config)
-        config = base_config
-    
-    # Override data directory
-    config['data']['data_dir'] = data_dir
+def profile_training_with_config(config: dict, limit_batches: int = 50):
+    """Profile training to identify bottlenecks with given config"""
     
     print("🔧 Profiling Training Performance...")
     print(f"   Config: {config_path}")
@@ -119,7 +95,7 @@ def profile_training(config_path: str, data_dir: str):
     prof_dir = Path("log/prof")
     prof_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"🔥 Starting profiling (50 batches)...")
+    print(f"🔥 Starting profiling ({limit_batches} batches)...")
     print(f"   Output: {prof_dir}")
     
     # Profile training
@@ -135,7 +111,7 @@ def profile_training(config_path: str, data_dir: str):
         with_stack=True
     ) as prof:
         for i, batch in enumerate(train_loader):
-            if i >= 50:
+            if i >= limit_batches:
                 break
                 
             # Move batch to device
@@ -154,7 +130,7 @@ def profile_training(config_path: str, data_dir: str):
             prof.step()
             
             if i % 10 == 0:
-                print(f"   Batch {i}/50, Loss: {loss.item():.4f}")
+                print(f"   Batch {i}/{limit_batches}, Loss: {loss.item():.4f}")
     
     print("✅ Profiling complete!")
     print(f"📊 View results with: tensorboard --logdir={prof_dir}")
@@ -185,10 +161,46 @@ def main():
                        help='Path to config file')
     parser.add_argument('--data_dir', type=str, default='../data/derived',
                        help='Path to data directory')
+    parser.add_argument('--async_sampler', action='store_true',
+                       help='Force enable async sampler mode')
+    parser.add_argument('--limit_train_batches', type=int, default=50,
+                       help='Number of batches to profile (default: 50)')
     
     args = parser.parse_args()
     
-    profile_training(args.config, args.data_dir)
+    # Load config and apply CLI overrides
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    # Handle config inheritance
+    if 'extends' in config:
+        base_config_path = Path(args.config).parent / config['extends']
+        with open(base_config_path, 'r') as f:
+            base_config = yaml.safe_load(f)
+        
+        # Handle nested inheritance
+        if 'extends' in base_config:
+            root_config_path = Path(args.config).parent / base_config['extends']
+            with open(root_config_path, 'r') as f:
+                root_config = yaml.safe_load(f)
+            root_config.update(base_config)
+            base_config = root_config
+            
+        base_config.update(config)
+        config = base_config
+    
+    # Apply CLI overrides
+    if args.async_sampler:
+        if 'model' not in config:
+            config['model'] = {}
+        config['model']['async_sampler'] = True
+        print("🔥 Forcing async_sampler=True via CLI")
+    
+    # Set data directory
+    config['data']['data_dir'] = args.data_dir
+    
+    # Call profile function with modified config
+    profile_training_with_config(config, args.limit_train_batches)
 
 if __name__ == '__main__':
     main()

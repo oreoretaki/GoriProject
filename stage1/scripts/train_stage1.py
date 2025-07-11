@@ -21,6 +21,7 @@ import yaml
 import math
 import numpy as np
 import torch
+import torch.profiler
 import torch.nn as nn
 import pytorch_lightning as pl
 from typing import Dict, Optional, Tuple, List
@@ -924,6 +925,25 @@ def main():
                 print(f"🔢 限定検証バッチ数: {limit_val}")
             else:
                 print("🚀 検証バッチ数制限なし（全データ）")
+    
+    # 🔥 プロファイルモード
+    if args.profile_mode:
+        print("🔍 プロファイルモード: 100ステップのみ実行")
+        from pytorch_lightning.profilers import PyTorchProfiler
+        profiler = PyTorchProfiler(
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=30),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler("log/prof"),
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True
+        )
+        trainer_kwargs['profiler'] = profiler
+        trainer_kwargs['max_steps'] = 100  # 100ステップのみ
+        trainer_kwargs['max_epochs'] = -1  # エポック制限無効
+        trainer_kwargs['logger'] = False   # ロガー無効化（プロファイルに集中）
+        trainer_kwargs['callbacks'] = [custom_progress]  # 最小限のコールバック
+        print("📁 プロファイル結果: log/prof (確認: tensorboard --logdir=log/prof)")
         
     trainer = pl.Trainer(**trainer_kwargs)
     
