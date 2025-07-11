@@ -124,7 +124,8 @@ class MaskingStrategy(nn.Module):
             actual_ratios = []
             for i in range(n_tf):
                 mask_i = masks[i] if masks.dim() == 2 else masks[0, i]
-                actual_ratio = mask_i.mean().item()
+                # 🔥 Bool tensor mean() エラー修正: float変換
+                actual_ratio = mask_i.float().mean().item()
                 actual_ratios.append(actual_ratio)
                 print(f"   [MASK DBG] TF{i} actual mask ratio: {actual_ratio:.4f}")
             print(f"   [MASK DBG] Mean actual mask ratio: {sum(actual_ratios)/len(actual_ratios):.4f}")
