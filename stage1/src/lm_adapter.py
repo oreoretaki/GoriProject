@@ -249,26 +249,16 @@ class T5TimeSeriesAdapter(nn.Module):
         stage1_d_model = config['model']['encoder']['d_model']
         self.output_projection = nn.Linear(self.d_model, stage1_d_model)
         
-        # 初期化時はT5部分を凍結
-        self.freeze_t5_encoder()
+        # 🔥 T5エンコーダーは最初から解凍状態（凍結機能廃止）
+        print(f"🔓 T5エンコーダーは最初から解凍状態で開始")
         
         print(f"✅ T5TimeSeriesAdapter初期化完了")
         print(f"   T5 d_model: {self.d_model}")
         print(f"   Stage-1 d_model: {stage1_d_model}")
         print(f"   Patch length: {self.patch_len}")
-        print(f"   初期凍結エポック数: {self.freeze_lm_epochs}")
+        print(f"   凍結機能: 廃止（常に解凍状態）")
     
-    def freeze_t5_encoder(self):
-        """T5エンコーダー部分を凍結"""
-        for param in self.t5_encoder.parameters():
-            param.requires_grad = False
-        print("🔒 T5エンコーダーを凍結しました")
-    
-    def unfreeze_t5_encoder(self):
-        """T5エンコーダー部分の凍結を解除"""
-        for param in self.t5_encoder.parameters():
-            param.requires_grad = True
-        print("🔓 T5エンコーダーの凍結を解除しました")
+    # 🔥 凍結機能は廃止 - T5エンコーダーは常に解凍状態
     
     def get_model_info(self) -> Dict:
         """モデル情報を返す"""

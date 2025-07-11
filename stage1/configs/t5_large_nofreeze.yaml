@@ -94,17 +94,14 @@ runtime:
   seed: 42
   experiment_name: "t5_large_nofreeze"
   
-# DataLoader最適化（T5用）- shared_baseから継承されるが、T5用に調整
+# DataLoader最適化（WSL用）- プロセス問題回避
 dataloader:
-  num_workers: 12                 # 18→12に削減（プロセス制御問題回避）
-  pin_memory: true                # GPU転送高速化
-  persistent_workers: true        # プロセス立ち上げオーバーヘッド削減
-  prefetch_factor: 6              # 先読み強化（2→6）
+  num_workers: 0                  # 🔥 WSL用: マルチプロセシング無効化
+  pin_memory: false               # 🔥 WSL用: メモリピン無効化
+  persistent_workers: false       # 🔥 WSL用: ワーカー持続無効化
+  prefetch_factor: 2              # 基本値に戻す
 
 # 開発用設定（全データ投入）
 development:
-  limit_train_batches: 2383      # 🔥 制限解除：全データ投入
-  limit_val_batches: 606         # 🔥 制限解除：全データ投入
-  # 🔥 shared_base.yamlの制限をオーバーライド
-  # limit_train_batches: null         # 完全に制限解除
-  # limit_val_batches: null           # 完全に制限解除
+  limit_train_batches: 100        # 🔥 プロファイル用: 100バッチ限定
+  limit_val_batches: 20           # 🔥 プロファイル用: 20バッチ限定
