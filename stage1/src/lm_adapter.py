@@ -115,10 +115,25 @@ class PatchEmbedding(nn.Module):
         
         # パッチ数を計算
         n_patches = seq_len // self.patch_len
-        effective_len = n_patches * self.patch_len
         
-        # シーケンス長をパッチ境界に調整
-        x = x[:, :effective_len, :]
+        # パッチ長がシーケンス長より長い場合の処理
+        if n_patches == 0:
+            # 最低1パッチを確保（パディングまたはトランケート）
+            n_patches = 1
+            if seq_len < self.patch_len:
+                # パディング: 不足分をゼロで埋める
+                padding_len = self.patch_len - seq_len
+                x_padded = torch.zeros(batch_size, self.patch_len, n_features, device=x.device, dtype=x.dtype)
+                x_padded[:, :seq_len, :] = x
+                x = x_padded
+                effective_len = self.patch_len
+            else:
+                effective_len = n_patches * self.patch_len
+                x = x[:, :effective_len, :]
+        else:
+            effective_len = n_patches * self.patch_len
+            # シーケンス長をパッチ境界に調整
+            x = x[:, :effective_len, :]
         
         # パッチ化: [batch, n_patches, patch_len, n_features]
         x = x.view(batch_size, n_patches, self.patch_len, n_features)
@@ -311,19 +326,23 @@ class T5TimeSeriesAdapter(nn.Module):
             valid_mask = ~key_padding_mask  # [batch, seq_len]
             
             # パッチレベルのマスクに変換
-            n_patches = patches.size(1)
-            patch_stride = max(1, seq_len // n_patches)
-            patch_mask = torch.zeros(batch_size, n_patches, device=x.device, dtype=torch.bool)
-            
-            for p in range(n_patches):
-                start_idx = p * patch_stride
-                end_idx = min(start_idx + self.patch_len, seq_len)
-                if start_idx < seq_len:
-                    # パッチ内に有効データが少なくとも1つあればvalid
-                    patch_mask[:, p] = valid_mask[:, start_idx:end_idx].any(dim=1)
-            
-            # attention_maskと統合
-            attention_mask = attention_mask & patch_mask
+            n_patches_actual = patches.size(1)
+            if n_patches_actual > 0:
+                patch_stride = max(1, seq_len // n_patches_actual) if seq_len > 0 else 1
+                patch_mask = torch.zeros(batch_size, n_patches_actual, device=x.device, dtype=torch.bool)
+                
+                for p in range(n_patches_actual):
+                    start_idx = p * patch_stride
+                    end_idx = min(start_idx + self.patch_len, seq_len)
+                    if start_idx < seq_len and end_idx > start_idx:
+                        # パッチ内に有効データが少なくとも1つあればvalid
+                        patch_mask[:, p] = valid_mask[:, start_idx:end_idx].any(dim=1)
+                    else:
+                        # 範囲外の場合は無効
+                        patch_mask[:, p] = False
+                
+                # attention_maskと統合
+                attention_mask = attention_mask & patch_mask
         
         # T5エンコーダーに入力
         encoder_outputs = self.t5_encoder(
