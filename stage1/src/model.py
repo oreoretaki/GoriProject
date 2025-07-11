@@ -825,7 +825,7 @@ class Stage1Model(nn.Module):
         fused_padding_masks = fused_padding_masks.view(batch_size * self.n_tf, max_seq_len)
         
         # 🔥 4. 共有エンコーダー1回呼び出し（6回→1回に削減）
-        if hasattr(self.shared_encoder, 'encoder'):
+        if hasattr(self.shared_encoder, 't5_encoder') or hasattr(self.shared_encoder, 'patch_embedding'):
             # T5TimeSeriesAdapter の場合
             encoded_features = self.shared_encoder(fused_features, key_padding_mask=fused_padding_masks)
         else:

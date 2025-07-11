@@ -102,6 +102,15 @@ dataloader:
   prefetch_factor: 4              # 🔥 H100用: 各ワーカー4バッチ先読み（GPUを空かさない）
   # メモリ増加予想: +4-5GB（num_workers:+1GB, pin_memory:+2GB, prefetch:+1-2GB）
 
+# マスキング設定（ベクトル化を一時無効化）
+masking:
+  mask_ratio: 0.15
+  mask_span_min: 3
+  mask_span_max: 10
+  sync_across_tf: false
+  mask_token_lr_scale: 1.0
+  use_vectorized: true            # 🔥 ベクトル化有効（10倍高速）
+
 # 開発用設定（全データ投入）
 development:
   limit_train_batches: 100        # 🔥 プロファイル用: 100バッチ限定
