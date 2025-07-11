@@ -493,10 +493,16 @@ class Stage1Model(nn.Module):
         Returns:
             outputs: Dict[str, torch.Tensor] - Same keys as input, values are [B, L_tf, 4]
         """
-        if self.async_sampler:
-            return self._forward_async(batch, eval_mask_ratio)
+        # 🔥 入力型チェック: TensorかDictかを判定
+        if isinstance(batch, dict):
+            # Dict形式 -> async_samplerの設定に従う
+            if self.async_sampler:
+                return self._forward_async(batch, eval_mask_ratio)
+            else:
+                return self._forward_sync(batch, eval_mask_ratio)
         else:
-            return self._forward_sync(batch, eval_mask_ratio)
+            # Tensor形式 -> 従来のlegacy forward
+            return self._forward_legacy_tensor(batch, eval_mask_ratio)
     
     def _forward_async(self, batch: Dict[str, torch.Tensor], eval_mask_ratio: Optional[float] = None) -> Dict[str, torch.Tensor]:
         """Async mode forward pass with variable-length support"""
@@ -640,6 +646,70 @@ class Stage1Model(nn.Module):
             outputs[tf] = reconstructed[:, i, :seq_len, :]
         
         return outputs
+    
+    def _forward_legacy_tensor(self, batch: torch.Tensor, eval_mask_ratio: Optional[float] = None) -> torch.Tensor:
+        """Legacy tensor format forward pass"""
+        # 従来のテンソル形式での処理
+        features = batch  # [batch, n_tf, seq_len, n_features]
+        batch_size, n_tf, seq_len, n_features = features.shape
+        
+        # 🔥 自己教師ありマスキング処理
+        training_masks = None
+        if self.training or eval_mask_ratio is not None:
+            mask_ratio = eval_mask_ratio if eval_mask_ratio is not None else 0.15
+            training_masks = torch.stack([
+                self.masking_strategy.generate_masks(
+                    features[b], 
+                    seed=hash((id(features), b)) % 2147483647,
+                    eval_mask_ratio_override=mask_ratio
+                ) 
+                for b in range(batch_size)
+            ], dim=0)
+        
+        # Apply masking
+        if training_masks is not None:
+            masked_features = torch.stack([
+                self.masking_strategy.apply_mask_to_features(features[b], training_masks[b])
+                for b in range(batch_size)
+            ], dim=0)
+        else:
+            masked_features = features
+            training_masks = torch.zeros(batch_size, n_tf, seq_len, device=features.device, dtype=torch.bool)
+        
+        # Process through model (legacy logic)
+        if hasattr(self, 'shared_encoder'):
+            if isinstance(self.shared_encoder, T5TimeSeriesAdapter):
+                encoded = self.shared_encoder(masked_features)
+            else:
+                tf_embeddings = []
+                for i in range(n_tf):
+                    stem_out = self.tf_stems[i](masked_features[:, i])
+                    tf_embeddings.append(stem_out)
+                tf_embeddings = torch.stack(tf_embeddings, dim=1)
+                
+                pos_ids = torch.arange(seq_len, device=masked_features.device).unsqueeze(0).expand(batch_size, -1)
+                pos_emb = self.pos_encoding(pos_ids).unsqueeze(1)
+                encoded = tf_embeddings + pos_emb
+                encoded = self.shared_encoder(encoded.view(batch_size, -1, encoded.shape[-1]))
+        else:
+            # Fallback to individual processing
+            tf_embeddings = []
+            for i in range(n_tf):
+                stem_out = self.tf_stems[i](masked_features[:, i])
+                tf_embeddings.append(stem_out)
+            encoded = torch.stack(tf_embeddings, dim=1)
+        
+        # Decode
+        reconstructed = []
+        for i in range(n_tf):
+            if hasattr(self, 'tf_decoders') and i < len(self.tf_decoders):
+                decoder_out = self.tf_decoders[i](encoded[:, i])
+            else:
+                decoder_out = encoded[:, i]
+            reconstructed.append(decoder_out)
+        
+        reconstructed = torch.stack(reconstructed, dim=1)
+        return reconstructed
     
     def _generate_tf_masks(self, x: torch.Tensor, mask_ratio: float = 0.15) -> torch.Tensor:
         """Generate self-supervised masks for a single TF"""
