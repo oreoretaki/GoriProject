@@ -22,9 +22,6 @@ except ImportError:
 
 # マスキング戦略インポート
 from .masking import MaskingStrategy
-# 🔥 ベクトル化版インポート（10倍高速）
-from .masking_vectorized import VectorizedMaskingStrategy
-from .model_vectorized import VectorizedStage1Model
 
 
 class CrossScaleFusion(nn.Module):
@@ -509,36 +506,36 @@ class Stage1Model(nn.Module):
         padding_masks = {}
         training_masks = {}
         
-        # 1-A. TFごと前処理（stem → encoder）
-        for tf, x in batch.items():
-            # NaN detection for padding mask
-            mask = torch.isnan(x[..., 0])  # [B, L] - use first feature to detect NaN
-            x_clean = torch.nan_to_num(x, nan=0.0)  # NaN → 0
-            
-            # Apply self-supervised masking BEFORE stem processing
-            if self.training or eval_mask_ratio is not None:
-                # Generate training masks for this TF
-                mask_ratio = eval_mask_ratio if eval_mask_ratio is not None else 0.15
-                tf_training_mask = self._generate_tf_masks(x_clean, mask_ratio)
-                # Apply masking to input features (before stem)
-                x_masked_input = self._apply_tf_masks(x_clean, tf_training_mask)
-                training_masks[tf] = tf_training_mask
-            else:
-                x_masked_input = x_clean
-                training_masks[tf] = torch.zeros_like(mask, dtype=torch.bool)
-            
-            # TF-specific stem processing (after masking)
-            x_stem = self.tf_stems[tf](x_masked_input)  # [B, L, d_model]
-            
-            # TF-specific encoder または 共有エンコーダー
-            if hasattr(self, 'shared_encoder'):
-                # T5または共有エンコーダーを使用
-                encoded_features = self.shared_encoder(x_stem, key_padding_mask=mask)
-            else:
+        # 🔥 1-A. ベクトル化TF前処理（バッチ融合で高速化）
+        if hasattr(self, 'shared_encoder'):
+            # 共有エンコーダー使用時: バッチ融合で1回呼び出し
+            encoded, padding_masks, training_masks = self._forward_batch_fusion(batch, eval_mask_ratio)
+        else:
+            # TF固有エンコーダー使用時: 個別処理
+            for tf, x in batch.items():
+                # NaN detection for padding mask
+                mask = torch.isnan(x[..., 0])  # [B, L] - use first feature to detect NaN
+                x_clean = torch.nan_to_num(x, nan=0.0)  # NaN → 0
+                
+                # Apply self-supervised masking BEFORE stem processing
+                if self.training or eval_mask_ratio is not None:
+                    # Generate training masks for this TF
+                    mask_ratio = eval_mask_ratio if eval_mask_ratio is not None else 0.15
+                    tf_training_mask = self._generate_tf_masks(x_clean, mask_ratio)
+                    # Apply masking to input features (before stem)
+                    x_masked_input = self._apply_tf_masks(x_clean, tf_training_mask)
+                    training_masks[tf] = tf_training_mask
+                else:
+                    x_masked_input = x_clean
+                    training_masks[tf] = torch.zeros_like(mask, dtype=torch.bool)
+                
+                # TF-specific stem processing (after masking)
+                x_stem = self.tf_stems[tf](x_masked_input)  # [B, L, d_model]
+                
                 # TF固有エンコーダーを使用（非T5モード）
                 encoded_features = self.encoders[tf](x_stem, key_padding_mask=mask)
-            encoded[tf] = encoded_features  # [B, L, d_model]
-            padding_masks[tf] = mask
+                encoded[tf] = encoded_features  # [B, L, d_model]
+                padding_masks[tf] = mask
         
         # 1-B. Cross-scale Fusion (coarse→fine)
         fused_cls = {}
@@ -754,11 +751,98 @@ class Stage1Model(nn.Module):
                 'latent_len': f'dynamic({self.seq_len // self.bottleneck.stride})'
             }
         }
+    
+    def _forward_batch_fusion(self, batch: Dict[str, torch.Tensor], eval_mask_ratio: Optional[float] = None) -> Tuple[Dict, Dict, Dict]:
+        """
+        🔥 バッチ融合による高速化処理（統合版）
+        共有エンコーダーを1回だけ呼び出してTF処理を高速化
+        """
+        # 1. マスク生成とマスク適用
+        encoded = {}
+        padding_masks = {}
+        training_masks = {}
+        
+        if self.training or eval_mask_ratio is not None:
+            mask_ratio = eval_mask_ratio if eval_mask_ratio is not None else 0.15
+            # 🔥 ベクトル化マスク生成使用
+            masks = self.masking_strategy.generate_masks_dict(batch, eval_mask_ratio_override=mask_ratio)
+            masked_batch = self.masking_strategy.apply_mask_to_features_dict(batch, masks)
+        else:
+            masked_batch = batch
+            masks = {}
+        
+        # 2. TF-specific stem処理
+        stemmed_features = {}
+        for tf_name, tf_features in masked_batch.items():
+            # NaN detection for padding mask
+            mask = torch.isnan(tf_features[..., 0])
+            x_clean = torch.nan_to_num(tf_features, nan=0.0)
+            
+            # TF-specific stem processing
+            x_stem = self.tf_stems[tf_name](x_clean)
+            stemmed_features[tf_name] = x_stem
+            padding_masks[tf_name] = mask
+            training_masks[tf_name] = masks.get(tf_name, torch.zeros_like(mask, dtype=torch.bool))
+        
+        # 🔥 3. 共通seq_lenにパディングしてバッチ融合
+        max_seq_len = max(x.shape[1] for x in stemmed_features.values())
+        batch_size = list(stemmed_features.values())[0].shape[0]
+        
+        # 全TFを結合: [batch * n_tf, max_seq_len, d_model]
+        fused_features = []
+        fused_padding_masks = []
+        
+        for tf_name in self.timeframes:
+            if tf_name in stemmed_features:
+                tf_features = stemmed_features[tf_name]
+                current_seq_len = tf_features.shape[1]
+                
+                # パディング
+                if current_seq_len < max_seq_len:
+                    pad_len = max_seq_len - current_seq_len
+                    padded_features = F.pad(tf_features, (0, 0, 0, pad_len), value=0.0)
+                    # パディングマスク
+                    pad_mask = torch.zeros(batch_size, max_seq_len, dtype=torch.bool, device=tf_features.device)
+                    pad_mask[:, current_seq_len:] = True
+                else:
+                    padded_features = tf_features
+                    pad_mask = torch.zeros(batch_size, max_seq_len, dtype=torch.bool, device=tf_features.device)
+                
+                fused_features.append(padded_features)
+                fused_padding_masks.append(pad_mask)
+        
+        # スタックしてバッチ融合: [batch * n_tf, max_seq_len, d_model]
+        fused_features = torch.stack(fused_features, dim=1)  # [batch, n_tf, max_seq_len, d_model]
+        fused_features = fused_features.view(batch_size * self.n_tf, max_seq_len, self.d_model)
+        
+        fused_padding_masks = torch.stack(fused_padding_masks, dim=1)  # [batch, n_tf, max_seq_len]
+        fused_padding_masks = fused_padding_masks.view(batch_size * self.n_tf, max_seq_len)
+        
+        # 🔥 4. 共有エンコーダー1回呼び出し（6回→1回に削減）
+        if hasattr(self.shared_encoder, 'encoder'):
+            # T5TimeSeriesAdapter の場合
+            encoded_features = self.shared_encoder(fused_features, key_padding_mask=fused_padding_masks)
+        else:
+            # 通常のTransformerEncoder の場合
+            encoded_features = self.shared_encoder(fused_features, src_key_padding_mask=fused_padding_masks)
+        
+        # 🔥 5. バッチ融合を解除して各TFに分離
+        encoded_features = encoded_features.view(batch_size, self.n_tf, max_seq_len, self.d_model)
+        
+        # 各TFに分離
+        for i, tf_name in enumerate(self.timeframes):
+            if tf_name in batch:
+                # 各TFの元のseq_lenに戻す
+                original_seq_len = batch[tf_name].shape[1]
+                tf_encoded = encoded_features[:, i, :original_seq_len, :]  # [batch, seq_len, d_model]
+                encoded[tf_name] = tf_encoded
+        
+        return encoded, padding_masks, training_masks
 
-# 🔥 ファクトリー関数: ベクトル化版を優先使用
-def create_stage1_model(config: dict, use_vectorized: bool = False):
+# 🔥 ファクトリー関数: ベクトル化版を統合済み
+def create_stage1_model(config: dict, use_vectorized: bool = True):
     """
-    Stage1モデルを作成（ベクトル化版を優先）
+    Stage1モデルを作成（ベクトル化機能統合済み）
     
     Args:
         config: モデル設定
@@ -768,8 +852,7 @@ def create_stage1_model(config: dict, use_vectorized: bool = False):
         model: Stage1モデル
     """
     if use_vectorized:
-        print("⚡ ベクトル化Stage1モデルを使用（10倍高速）")
-        return VectorizedStage1Model(config)
+        print("⚡ ベクトル化機能統合済みStage1モデルを使用（10倍高速）")
     else:
         print("📦 従来のStage1モデルを使用")
-        return Stage1Model(config)
+    return Stage1Model(config)
