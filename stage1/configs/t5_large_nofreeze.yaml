@@ -87,7 +87,7 @@ logging:
   checkpoint_every_n_epochs: 1    # 毎エポック評価
   save_top_k: 2                   # ベスト2のみ保存（ディスク節約）
   monitor: "val_correlation_mean"
-  progress_bar_refresh_rate: 200  # 🔥 stdout削減: 200step毎のみ更新
+  progress_bar_refresh_rate: 5    # 🔥 進捗確認: 5step毎に更新
 
 # 実行設定
 runtime:

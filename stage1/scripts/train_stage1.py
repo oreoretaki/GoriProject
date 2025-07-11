@@ -70,7 +70,7 @@ except ImportError:
 class CustomProgressBar(TQDMProgressBar):
     """◆ カスタムプログレスバー：重要メトリクスのみ表示"""
     
-    def __init__(self, refresh_rate: int = 200):  # 🔥 200step毎に更新（stdout削減）
+    def __init__(self, refresh_rate: int = 5):  # 🔥 5step毎に更新（進捗を見やすく）
         super().__init__(refresh_rate=refresh_rate)
     
     def get_metrics(self, trainer, pl_module):
