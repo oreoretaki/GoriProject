@@ -261,14 +261,18 @@ def create_stage1_dataloaders(data_dir: str, config: dict) -> Tuple[DataLoader, 
     async_sampler = config.get('model', {}).get('async_sampler', False)
     
     # 最適化設定
+    num_workers = dataloader_config.get('num_workers', 8)
     dataloader_kwargs = {
         'batch_size': batch_size,
-        'num_workers': dataloader_config.get('num_workers', 8),
+        'num_workers': num_workers,
         'pin_memory': dataloader_config.get('pin_memory', True),
         'persistent_workers': dataloader_config.get('persistent_workers', True),
-        'prefetch_factor': dataloader_config.get('prefetch_factor', 4),
         'drop_last': not async_sampler,  # async時はFalse（可変長対応）、sync時はTrue
     }
+    
+    # 🔥 prefetch_factorはnum_workers > 0の場合のみ追加
+    if num_workers > 0:
+        dataloader_kwargs['prefetch_factor'] = dataloader_config.get('prefetch_factor', 4)
     
     # 非同期モードの場合、collate_fnを追加
     if async_sampler:
@@ -295,6 +299,7 @@ def create_stage1_dataloaders(data_dir: str, config: dict) -> Tuple[DataLoader, 
     print(f"📊 DataLoader作成完了")
     print(f"   訓練: {len(train_loader)}バッチ ({len(train_dataset)}サンプル)")
     print(f"   検証: {len(val_loader)}バッチ ({len(val_dataset)}サンプル)")
-    print(f"   最適化: num_workers={dataloader_kwargs['num_workers']}, prefetch={dataloader_kwargs['prefetch_factor']}")
+    prefetch_info = f"prefetch={dataloader_kwargs.get('prefetch_factor', 'disabled')}" if num_workers > 0 else "prefetch=disabled"
+    print(f"   最適化: num_workers={dataloader_kwargs['num_workers']}, {prefetch_info}")
     
     return train_loader, val_loader
