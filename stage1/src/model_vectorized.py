@@ -66,11 +66,13 @@ class VectorizedStage1Model(nn.Module):
         if self.config.get('transfer_learning', {}).get('use_pretrained_lm', False):
             try:
                 from .lm_adapter import T5TimeSeriesAdapter
+                print("🤗 T5転移学習を使用します（ベクトル化版・共有エンコーダー）")
                 return T5TimeSeriesAdapter(self.config)
             except ImportError:
                 print("⚠️ T5未利用 - FlashAttention2対応Transformerエンコーダーを使用")
                 return self._create_flash_attention_encoder()
         else:
+            print("📦 従来のTransformerエンコーダーを使用します（ベクトル化版）")
             return self._create_flash_attention_encoder()
     
     def _create_flash_attention_encoder(self):
@@ -136,7 +138,7 @@ class VectorizedStage1Model(nn.Module):
         # 🔥 1. 一括マスク生成（Python ループ除去）
         if self.training or eval_mask_ratio is not None:
             mask_ratio = eval_mask_ratio if eval_mask_ratio is not None else 0.15
-            masks = self.masking_strategy.generate_masks_dict(batch, mask_ratio=mask_ratio)
+            masks = self.masking_strategy.generate_masks_dict(batch, eval_mask_ratio_override=mask_ratio)
             masked_batch = self.masking_strategy.apply_mask_to_features_dict(batch, masks)
         else:
             masked_batch = batch
@@ -190,7 +192,12 @@ class VectorizedStage1Model(nn.Module):
         # 🔥 3. 共有エンコーダー1回呼び出し（6回→1回に削減）
         if hasattr(self.shared_encoder, 'forward'):
             # T5またはTransformerエンコーダー
-            encoded_features = self.shared_encoder(fused_features, key_padding_mask=padding_masks)
+            if hasattr(self.shared_encoder, 'encoder'):
+                # T5TimeSeriesAdapter の場合
+                encoded_features = self.shared_encoder(fused_features, key_padding_mask=padding_masks)
+            else:
+                # 通常のTransformerEncoder の場合
+                encoded_features = self.shared_encoder(fused_features, src_key_padding_mask=padding_masks)
         else:
             encoded_features = fused_features
         
