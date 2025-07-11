@@ -259,12 +259,14 @@ class MultiTFWindowSampler:
         # サンプル数の計算（モードによって異なる）
         if async_sampler:
             # 非同期モード: 最大サンプル数を使用（各TFが独立）
-            self.total_samples = max(sample_counts) if sample_counts else 0
+            self.max_samples = max(sample_counts) if sample_counts else 0
             self.min_samples = min(sample_counts) if sample_counts else 0
+            self.total_samples = self.max_samples  # 🔥 非同期では最大を使用
         else:
             # 同期モード: 最小サンプル数を使用（全TF同期）
-            self.total_samples = min(sample_counts) if sample_counts else 0
-            self.min_samples = self.total_samples
+            self.min_samples = min(sample_counts) if sample_counts else 0
+            self.max_samples = max(sample_counts) if sample_counts else 0
+            self.total_samples = self.min_samples  # 同期では最小を使用
         
         if self.total_samples == 0:
             raise ValueError("全TFでサンプル数0 - データローダーを作成できません")
@@ -273,10 +275,13 @@ class MultiTFWindowSampler:
         print(f"   有効TF数: {len(self.timeframes)}")
         print(f"   有効TF: {self.timeframes}")
         if async_sampler:
-            print(f"   最大サンプル数: {self.total_samples:,}")
+            print(f"   最大サンプル数: {self.max_samples:,}")
             print(f"   最小サンプル数: {self.min_samples:,}")
+            print(f"   🔥 __len__返却値: {self.total_samples:,} (max使用)")
         else:
             print(f"   最小サンプル数: {self.min_samples:,}")
+            print(f"   最大サンプル数: {self.max_samples:,}")
+            print(f"   __len__返却値: {self.total_samples:,} (min使用)")
         
         # 🔥 Drop-in Sampling 初期化
         if async_sampler:
@@ -308,7 +313,8 @@ class MultiTFWindowSampler:
     
     def __len__(self) -> int:
         """総サンプル数を返す（モードによって異なる）"""
-        return self.total_samples
+        # 🔥 async_samplerモードでは必ず最大サンプル数を返す
+        return self.max_samples if self.async_sampler else self.min_samples
     
     def __getitem__(self, idx: int) -> Dict[str, pd.DataFrame]:
         """ウィンドウデータを取得（モードによって異なる）"""
