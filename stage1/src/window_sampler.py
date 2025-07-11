@@ -62,7 +62,7 @@ class SingleTFWindowSampler:
         
         # 🔥 stdout削減: 詳細出力を最小化
         if tf_name == 'm1':  # M1の場合のみ出力
-            print(f"🔍 SingleTFWindowSampler初期化中... ({len(self.timeframes)} TFs)")
+            print(f"🔍 SingleTFWindowSampler初期化中... ({tf_name})")
         
         # 有効ウィンドウ検索
         self.valid_windows = self._find_valid_windows()
