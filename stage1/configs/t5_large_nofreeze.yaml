@@ -34,7 +34,7 @@ model:
     d_conv: 4
     expand: 2
     cross_attn_every: 2
-    flash_attn: true
+    flash_attn: false
     
   bottleneck:
     latent_len: 16                # seq_len/8 = 128/8 = 16
