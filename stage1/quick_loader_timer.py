@@ -56,10 +56,19 @@ def test_dataloader_speed():
     for i, batch in zip(range(test_batches), train_loader):
         # バッチデータを軽く触る（遅延読み込み回避）
         if isinstance(batch, dict):
-            for tf_name, tf_data in batch.items():
-                _ = tf_data.shape  # shape確認だけ（GPU転送なし）
+            # Model v2のDict形式の場合
+            if 'features' in batch:
+                for tf_name, tf_tensor in batch['features'].items():
+                    if hasattr(tf_tensor, 'shape'):
+                        _ = tf_tensor.shape  # shape確認だけ（GPU転送なし）
+            if 'targets' in batch:
+                for tf_name, tf_tensor in batch['targets'].items():
+                    if hasattr(tf_tensor, 'shape'):
+                        _ = tf_tensor.shape  # shape確認だけ（GPU転送なし）
         else:
-            _ = batch.shape
+            # Legacy形式の場合
+            if hasattr(batch, 'shape'):
+                _ = batch.shape
         
         # プログレス表示
         if i % 50 == 0:
