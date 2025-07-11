@@ -299,9 +299,12 @@ class MultiTFWindowSampler:
             if 'm1' in self.sampling_probs:
                 self.sampling_probs['m1'] = 1.0
             
-            # 空のテンソル（ドロップ時に使用）
+            # 🔥 共有イミュータブルな空テンソル（DataFrame代替）
             import torch
-            self.empty_tensor = torch.full((self.seq_len, 6), float('nan'))
+            # 空テンソル（GCフレンドリー）
+            self.empty_tensor = torch.empty((0, 6), dtype=torch.float32)
+            # ダミーインデックス（処理用）
+            self.dummy_index = None
             
             print(f"🎲 Drop-in Sampling有効:")
             for tf in self.timeframes:
@@ -330,14 +333,9 @@ class MultiTFWindowSampler:
                 # 🔥 Drop-in Sampling: 確率的にドロップ
                 import torch
                 if torch.rand(()) > self.sampling_probs[tf_name]:
-                    # ドロップ: 空のテンソルを返す
-                    # DataFrameの形にする必要があるため、空のDataFrameを作成
-                    empty_df = pd.DataFrame(
-                        index=pd.date_range('2000-01-01', periods=self.seq_len, freq='1min'),
-                        columns=['open', 'high', 'low', 'close', 'spread', 'typical_price'],
-                        data=float('nan')
-                    )
-                    tf_windows[tf_name] = empty_df
+                    # 🔥 ドロップ: 共有空テンソルを返す（DataFrame生成禁止）
+                    # ※ Stage1Datasetでtensorに変換されるため、空テンソルでOK
+                    tf_windows[tf_name] = self.empty_tensor  # 共有イミュータブル
                     continue
             
             if self.async_sampler:

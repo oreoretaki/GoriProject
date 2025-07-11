@@ -19,12 +19,14 @@ import sys
 import argparse
 import yaml
 import math
+import gc  # 🔥 メモリ管理用
 import numpy as np
 import torch
 import torch.profiler
 import torch.nn as nn
 import pytorch_lightning as pl
 from typing import Dict, Optional, Tuple, List
+from pytorch_lightning.callbacks import Callback
 
 # Tensor Core最適化（PyTorch 2.0+）
 torch.set_float32_matmul_precision('high')
@@ -117,6 +119,25 @@ class CustomProgressBar(TQDMProgressBar):
                 filtered[dst_key] = val
         
         return filtered
+
+class MemoryManagementCallback(Callback):
+    """🔥 メモリ管理コールバック - DataFrameリーク対策"""
+    
+    def __init__(self, gc_every_n_steps: int = 20):
+        super().__init__()
+        self.gc_every_n_steps = gc_every_n_steps
+        
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        """20ステップごとにGC実行"""
+        if batch_idx % self.gc_every_n_steps == 0:
+            # ① 循環参照を即回収
+            gc.collect()
+            # ② CUDAキャッシュをクリア
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            if batch_idx % (self.gc_every_n_steps * 5) == 0:  # 100ステップごとにログ
+                print(f"🗑️ GC executed at step {batch_idx}")
 
 class Stage1LightningModule(pl.LightningModule):
     """Stage 1 PyTorch Lightning モジュール"""
@@ -832,6 +853,10 @@ def main():
     # コールバック設定
     callbacks = []
     
+    # 🔥 メモリ管理コールバック（DataFrameリーク対策）
+    memory_callback = MemoryManagementCallback(gc_every_n_steps=20)
+    callbacks.append(memory_callback)
+    
     # チェックポイント保存
     checkpoint_callback = ModelCheckpoint(
         dirpath=Path(args.config).parent.parent / 'checkpoints',
@@ -943,7 +968,7 @@ def main():
         trainer_kwargs['max_steps'] = 100  # 100ステップのみ
         trainer_kwargs['max_epochs'] = -1  # エポック制限無効
         trainer_kwargs['logger'] = False   # ロガー無効化（プロファイルに集中）
-        trainer_kwargs['callbacks'] = [custom_progress]  # 最小限のコールバック
+        trainer_kwargs['callbacks'] = [custom_progress, memory_callback]  # 🔥 メモリ管理も継続
         print("📁 プロファイル結果: log/prof (確認: tensorboard --logdir=log/prof)")
         
     trainer = pl.Trainer(**trainer_kwargs)
