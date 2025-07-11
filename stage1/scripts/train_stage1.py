@@ -903,15 +903,27 @@ def main():
     # オプション引数を追加
     if args.fast_dev_run:
         trainer_kwargs['fast_dev_run'] = True
+        print("🚀 Fast Dev Run モード有効")
     if args.profiler:
         trainer_kwargs['profiler'] = args.profiler
         
     # 開発用設定（バッチ数制限）
+    print(f"🔍 DEBUG: config['development'] = {config.get('development', 'NOT_FOUND')}")
     if 'development' in config and config['development'] is not None:
-        if 'limit_train_batches' in config['development'] and config['development']['limit_train_batches'] is not None:
-            trainer_kwargs['limit_train_batches'] = config['development']['limit_train_batches']
-        if 'limit_val_batches' in config['development'] and config['development']['limit_val_batches'] is not None:
-            trainer_kwargs['limit_val_batches'] = config['development']['limit_val_batches']
+        if 'limit_train_batches' in config['development']:
+            limit_train = config['development']['limit_train_batches']
+            if limit_train is not None:
+                trainer_kwargs['limit_train_batches'] = limit_train
+                print(f"🔢 限定訓練バッチ数: {limit_train}")
+            else:
+                print("🚀 訓練バッチ数制限なし（全データ）")
+        if 'limit_val_batches' in config['development']:
+            limit_val = config['development']['limit_val_batches']
+            if limit_val is not None:
+                trainer_kwargs['limit_val_batches'] = limit_val
+                print(f"🔢 限定検証バッチ数: {limit_val}")
+            else:
+                print("🚀 検証バッチ数制限なし（全データ）")
         
     trainer = pl.Trainer(**trainer_kwargs)
     
