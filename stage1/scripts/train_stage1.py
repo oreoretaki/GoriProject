@@ -752,6 +752,7 @@ def main():
     parser.add_argument('--mask_token_lr_scale', type=float, default=None, help='マスクトークンの学習率スケール (例: 0.1)')
     parser.add_argument('--async_sampler', action='store_true', help='非同期マルチスケールモードを有効化 (Model v2)')
     parser.add_argument('--seeds', type=int, nargs='+', default=None, help='複数シード実行 (例: --seeds 42 123 2025)')
+    parser.add_argument('--profile_mode', action='store_true', help='プロファイルモード (100ステップのみ実行)')
     
     args = parser.parse_args()
     
