@@ -99,6 +99,52 @@ class PatchEmbedding(nn.Module):
                                    dtype=torch.bool, device=x.device)
         
         return patches, attention_mask
+    
+    def forward_single_tf(self, x: torch.Tensor, tf_idx: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        単一TF用のパッチ埋め込み (async mode)
+        
+        Args:
+            x: [batch, seq_len, n_features]
+            tf_idx: タイムフレームインデックス (projection選択用)
+        Returns:
+            patches: [batch, n_patches, d_model]
+            attention_mask: [batch, n_patches]
+        """
+        batch_size, seq_len, n_features = x.shape
+        
+        # パッチ数を計算
+        n_patches = seq_len // self.patch_len
+        effective_len = n_patches * self.patch_len
+        
+        # シーケンス長をパッチ境界に調整
+        x = x[:, :effective_len, :]
+        
+        # パッチ化: [batch, n_patches, patch_len, n_features]
+        x = x.view(batch_size, n_patches, self.patch_len, n_features)
+        
+        # パッチを平坦化: [batch, n_patches, patch_dim]
+        patch_dim = self.patch_len * n_features
+        x = x.view(batch_size, n_patches, patch_dim)
+        
+        # 指定TFの投影層を使用
+        tf_idx = min(tf_idx, len(self.patch_projections) - 1)  # 範囲外対策
+        patches = self.patch_projections[tf_idx](x)  # [batch, n_patches, d_model]
+        
+        # 位置エンコーディング追加
+        pos_emb = self.pos_embedding[:, :n_patches, :]  # [1, n_patches, d_model]
+        patches = patches + pos_emb
+        
+        # T5互換正規化とスケーリング
+        patches = self.layer_norm(patches)
+        patches = patches / math.sqrt(self.d_model)
+        patches = self.dropout(patches)
+        
+        # アテンションマスク (すべて有効)
+        attention_mask = torch.ones(batch_size, n_patches, 
+                                   dtype=torch.bool, device=x.device)
+        
+        return patches, attention_mask
 
 
 class T5TimeSeriesAdapter(nn.Module):
@@ -208,12 +254,89 @@ class T5TimeSeriesAdapter(nn.Module):
             'model_size_mb': total_params * 4 / (1024 * 1024),  # float32を仮定
         }
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
+        Args:
+            x: [batch, n_tf, seq_len, n_features] or [batch, seq_len, n_features] (async mode)
+            key_padding_mask: [batch, seq_len] padding mask (optional, async mode only)
+        Returns:
+            encoded: [batch, n_tf, seq_len, d_model] or [batch, seq_len, d_model] (Stage-1互換)
+        """
+        # 入力の次元数で処理方法を分岐
+        if x.dim() == 3:
+            # Async mode: [batch, seq_len, n_features]
+            return self._forward_single_tf(x, key_padding_mask)
+        elif x.dim() == 4:
+            # Legacy mode: [batch, n_tf, seq_len, n_features]
+            return self._forward_multi_tf(x)
+        else:
+            raise ValueError(f"Unexpected input shape: {x.shape}")
+    
+    def _forward_single_tf(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        単一TF用forward (async mode)
+        
+        Args:
+            x: [batch, seq_len, n_features] 
+            key_padding_mask: [batch, seq_len] padding mask (True=valid, False=padded)
+        Returns:
+            encoded: [batch, seq_len, d_model]
+        """
+        batch_size, seq_len, n_features = x.shape
+        
+        # 単一TF用にreshape: [batch, 1, seq_len, n_features]
+        x_reshaped = x.unsqueeze(1)
+        
+        # パッチ埋め込み（単一TF用）
+        patches, attention_mask = self.patch_embedding.forward_single_tf(x_reshaped[:, 0], tf_idx=0)
+        # patches: [batch, n_patches, d_model]
+        # attention_mask: [batch, n_patches]
+        
+        # key_padding_maskがある場合、パッチレベルのマスクに変換
+        if key_padding_mask is not None:
+            # key_padding_maskを反転（T5は True=valid, False=padded を期待）
+            valid_mask = ~key_padding_mask  # [batch, seq_len]
+            
+            # パッチレベルのマスクに変換
+            n_patches = patches.size(1)
+            patch_stride = max(1, seq_len // n_patches)
+            patch_mask = torch.zeros(batch_size, n_patches, device=x.device, dtype=torch.bool)
+            
+            for p in range(n_patches):
+                start_idx = p * patch_stride
+                end_idx = min(start_idx + self.patch_len, seq_len)
+                if start_idx < seq_len:
+                    # パッチ内に有効データが少なくとも1つあればvalid
+                    patch_mask[:, p] = valid_mask[:, start_idx:end_idx].any(dim=1)
+            
+            # attention_maskと統合
+            attention_mask = attention_mask & patch_mask
+        
+        # T5エンコーダーに入力
+        encoder_outputs = self.t5_encoder(
+            inputs_embeds=patches,
+            attention_mask=attention_mask.to(torch.float32)
+        )
+        
+        # 最後の隠れ状態を取得
+        encoded = encoder_outputs.last_hidden_state  # [batch, n_patches, d_model]
+        
+        # パッチからシーケンスに復元（補間）
+        encoded = self._patches_to_sequence(encoded, seq_len)  # [batch, seq_len, d_model]
+        
+        # Stage-1のd_modelに投影
+        encoded = self.output_projection(encoded)
+        
+        return encoded
+        
+    def _forward_multi_tf(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        マルチTF用forward (legacy mode)
+        
         Args:
             x: [batch, n_tf, seq_len, n_features]
         Returns:
-            encoded: [batch, n_tf, seq_len, d_model] (Stage-1互換)
+            encoded: [batch, n_tf, seq_len, d_model]
         """
         batch_size, n_tf, seq_len, n_features = x.shape
         
@@ -262,6 +385,34 @@ class T5TimeSeriesAdapter(nn.Module):
         output = self.output_projection(encoded_patches)
         
         return output
+    
+    def _patches_to_sequence(self, patches: torch.Tensor, target_seq_len: int) -> torch.Tensor:
+        """
+        パッチからシーケンスに復元（補間）
+        
+        Args:
+            patches: [batch, n_patches, d_model]
+            target_seq_len: 目標シーケンス長
+        Returns:
+            sequence: [batch, target_seq_len, d_model]
+        """
+        batch_size, n_patches, d_model = patches.shape
+        patch_seq_len = n_patches * self.patch_len
+        
+        if patch_seq_len != target_seq_len:
+            # 長さが異なる場合は補間
+            sequence = F.interpolate(
+                patches.permute(0, 2, 1),  # [batch, d_model, n_patches]
+                size=target_seq_len,
+                mode='linear',
+                align_corners=False
+            ).permute(0, 2, 1)  # [batch, target_seq_len, d_model]
+        else:
+            # パッチを展開
+            sequence = patches.repeat_interleave(self.patch_len, dim=1)
+            sequence = sequence[:, :target_seq_len, :]
+        
+        return sequence
 
 
 try:

@@ -23,6 +23,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from typing import Dict, Optional, Tuple, List
 
 # Tensor Core最適化（PyTorch 2.0+）
 torch.set_float32_matmul_precision('high')
@@ -141,31 +142,48 @@ class Stage1LightningModule(pl.LightningModule):
         return self.model(features, training_masks=training_masks)
         
     def training_step(self, batch, batch_idx):
-        features = batch['features']  # [batch, n_tf, seq_len, n_features] 生データ
-        targets = batch['targets']    # [batch, n_tf, seq_len, 4]
+        features = batch['features']
+        targets = batch['targets']
+        
+        # Dict形式対応: async_samplerモードかを判定
+        async_sampler = self.config.get('model', {}).get('async_sampler', False)
         
         # T5勾配フローチェック（T5転移学習時のみ、最初の数ステップ）
-        if batch_idx < 3 and hasattr(self.model.shared_encoder, 't5_encoder'):
-            t5_encoder = self.model.shared_encoder.t5_encoder
-            # T5EncoderModelの正しい構造を使用
-            sample_param = t5_encoder.encoder.block[0].layer[0].SelfAttention.q.weight
-            print(f"   [T5 DBG] Step {batch_idx}: requires_grad={sample_param.requires_grad}")
-            if sample_param.grad is not None:
-                grad_norm = sample_param.grad.abs().sum().item()
-                print(f"   [T5 DBG] Step {batch_idx}: grad_norm={grad_norm:.6f}")
-            else:
-                print(f"   [T5 DBG] Step {batch_idx}: grad=None")
+        if batch_idx < 3:
+            # T5 encoderへのアクセス方法を修正
+            if async_sampler and hasattr(self.model, 'encoders'):
+                # async mode: 最初のTFのencoderをチェック
+                first_tf = list(self.model.encoders.keys())[0]
+                if hasattr(self.model.encoders[first_tf], 't5_encoder'):
+                    t5_encoder = self.model.encoders[first_tf].t5_encoder
+                    self._debug_t5_gradients(t5_encoder, batch_idx)
+            elif hasattr(self.model, 'shared_encoder') and hasattr(self.model.shared_encoder, 't5_encoder'):
+                t5_encoder = self.model.shared_encoder.t5_encoder
+                self._debug_t5_gradients(t5_encoder, batch_idx)
         
-        # Forward pass（新しいAPI - モデル内でマスキング）
-        outputs = self.model(features)  # training_masks=Noneで自動生成
-        reconstructed = outputs['reconstructed']
-        training_masks = outputs['training_masks']  # モデルが生成したマスク
+        # eval_mask_ratioの渡し方を統一
+        eval_mask_ratio = None  # 訓練時はNone
         
-        # M1データを抽出（クロス損失用）
-        m1_data = targets[:, 0]  # [batch, seq_len, 4]
-        
-        # 損失計算（モデル生成マスクを使用）
-        losses = self.criterion(reconstructed, targets, training_masks, m1_data)
+        # Forward pass（Dict対応）
+        if async_sampler:
+            # Model v2: Dict形式
+            outputs = self.model(features, eval_mask_ratio=eval_mask_ratio)
+            
+            # M1データを抽出（クロス損失用）
+            m1_data = targets.get('m1') if isinstance(targets, dict) else None
+            
+            # 損失計算（Dict版）
+            losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
+        else:
+            # Legacy: tensor形式
+            outputs = self.model(features, eval_mask_ratio=eval_mask_ratio)
+            reconstructed = outputs  # 旧形式では直接テンソルを返す
+            
+            # M1データを抽出（クロス損失用）
+            m1_data = targets[:, 0]  # [batch, seq_len, 4]
+            
+            # 損失計算（tensor版）
+            losses = self.criterion(reconstructed, targets, masks=None, m1_data=m1_data)
         
         # ◆ 学習損失を毎ステップでログ（プログレスバーに表示）
         loss = losses['total']
@@ -182,6 +200,20 @@ class Stage1LightningModule(pl.LightningModule):
                         on_step=False, on_epoch=True, prog_bar=False, logger=True)
             
         return loss
+        
+    def _debug_t5_gradients(self, t5_encoder, batch_idx):
+        """T5勾配フローのデバッグ"""
+        try:
+            # T5EncoderModelの正しい構造を使用
+            sample_param = t5_encoder.encoder.block[0].layer[0].SelfAttention.q.weight
+            print(f"   [T5 DBG] Step {batch_idx}: requires_grad={sample_param.requires_grad}")
+            if sample_param.grad is not None:
+                grad_norm = sample_param.grad.abs().sum().item()
+                print(f"   [T5 DBG] Step {batch_idx}: grad_norm={grad_norm:.6f}")
+            else:
+                print(f"   [T5 DBG] Step {batch_idx}: grad=None")
+        except (AttributeError, IndexError) as e:
+            print(f"   [T5 DBG] Step {batch_idx}: T5構造アクセスエラー - {e}")
     
     def on_train_epoch_start(self):
         """エポック開始時の初期化"""
@@ -241,35 +273,50 @@ class Stage1LightningModule(pl.LightningModule):
         return super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
         
     def validation_step(self, batch, batch_idx):
-        features = batch['features']  # 生の特徴量
+        features = batch['features']
         targets = batch['targets']
+        
+        # Dict形式対応: async_samplerモードかを判定
+        async_sampler = self.config.get('model', {}).get('async_sampler', False)
         
         # eval_mask_ratioのオーバーライドチェック
         eval_mask_ratio = self.config.get('evaluation', {}).get('eval_mask_ratio')
-        training_masks = None
         
-        if eval_mask_ratio is not None:
-            # 🔥 eval_mask_ratio指定時：カスタムマスクを生成
-            batch_size, n_tf, seq_len, n_features = features.shape
-            training_masks = torch.stack([
-                self.model.masking_strategy.generate_masks(
-                    features[b], 
-                    seed=batch_idx * batch_size + b, 
-                    eval_mask_ratio_override=eval_mask_ratio
-                )
-                for b in range(batch_size)
-            ], dim=0)  # [batch, n_tf, seq_len]
-        
-        # Forward pass（新しいAPI）
-        outputs = self.model(features, training_masks=training_masks)
-        reconstructed = outputs['reconstructed']
-        actual_training_masks = outputs['training_masks']  # 実際に使用されたマスク
-        
-        # M1データを抽出
-        m1_data = targets[:, 0]
-        
-        # 損失計算（新しいマスクを使用）
-        losses = self.criterion(reconstructed, targets, actual_training_masks, m1_data)
+        # Forward pass（Dict対応）
+        if async_sampler:
+            # Model v2: Dict形式
+            outputs = self.model(features, eval_mask_ratio=eval_mask_ratio)
+            
+            # M1データを抽出（クロス損失用）
+            m1_data = targets.get('m1') if isinstance(targets, dict) else None
+            
+            # 損失計算（Dict版）
+            losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
+        else:
+            # Legacy: tensor形式
+            if eval_mask_ratio is not None:
+                # 🔥 eval_mask_ratio指定時：カスタムマスクを生成
+                batch_size, n_tf, seq_len, n_features = features.shape
+                training_masks = torch.stack([
+                    self.model.masking_strategy.generate_masks(
+                        features[b], 
+                        seed=batch_idx * batch_size + b, 
+                        eval_mask_ratio_override=eval_mask_ratio
+                    )
+                    for b in range(batch_size)
+                ], dim=0)  # [batch, n_tf, seq_len]
+            else:
+                training_masks = None
+            
+            # Forward pass（Legacy API）
+            outputs = self.model(features, eval_mask_ratio=eval_mask_ratio)
+            reconstructed = outputs  # 旧形式では直接テンソルを返す
+            
+            # M1データを抽出
+            m1_data = targets[:, 0]
+            
+            # 損失計算（tensor版）
+            losses = self.criterion(reconstructed, targets, masks=training_masks, m1_data=m1_data)
         
         # ◆ 検証損失をプログレスバーに表示（エポック終了時）
         self.log("val_loss", losses['total'],
@@ -285,14 +332,31 @@ class Stage1LightningModule(pl.LightningModule):
                 self.log(f'val_{loss_name}', loss_value, 
                         on_epoch=True, prog_bar=False, logger=True)
             
-        # 🔥 相関メトリクス計算（マスク位置のみ・リーク完全遮断版）
-        correlations = self._calculate_correlations(reconstructed, targets, actual_training_masks)
-        for tf_idx, corr in enumerate(correlations):
-            tf_name = self.config['data']['timeframes'][tf_idx]
-            self.log(f'val_corr_{tf_name}', corr, on_epoch=True, prog_bar=False, logger=True)
+        # 🔥 相関メトリクス計算（Dict対応）
+        if async_sampler:
+            correlations = self._calculate_correlations_dict(outputs, targets)
+            timeframes = self.config['data']['timeframes']
+            for tf_idx, tf_name in enumerate(timeframes):
+                if tf_name in correlations:
+                    self.log(f'val_corr_{tf_name}', correlations[tf_name], on_epoch=True, prog_bar=False, logger=True)
+            
+            # 平均相関
+            corr_values = [correlations[tf] for tf in timeframes if tf in correlations]
+            if corr_values:
+                mean_corr = torch.mean(torch.stack(corr_values))
+            else:
+                mean_corr = torch.tensor(0.0)
+        else:
+            # Legacy相関計算
+            correlations = self._calculate_correlations(outputs, targets, training_masks)
+            for tf_idx, corr in enumerate(correlations):
+                tf_name = self.config['data']['timeframes'][tf_idx]
+                self.log(f'val_corr_{tf_name}', corr, on_epoch=True, prog_bar=False, logger=True)
+            
+            # 平均相関
+            mean_corr = torch.mean(torch.stack(correlations))
             
         # ◆ 平均相関をプログレスバーに表示（エポック終了時）
-        mean_corr = torch.mean(torch.stack(correlations))
         self.log('val_correlation', mean_corr, on_epoch=True, prog_bar=True, logger=True)
         self.log('val_correlation_mean', mean_corr, on_epoch=True, prog_bar=False, logger=True)  # 後方互換性
         
@@ -390,6 +454,52 @@ class Stage1LightningModule(pl.LightningModule):
                     correlations.append(torch.tensor(0.0, device=pred.device))
             else:
                 correlations.append(torch.tensor(0.0, device=pred.device))
+                
+        return correlations
+    
+    def _calculate_correlations_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Dict形式のTFごと相関計算（Model v2用）"""
+        correlations = {}
+        
+        for tf_name, pred_tf in pred.items():
+            if tf_name not in target:
+                continue
+                
+            target_tf = target[tf_name]
+            
+            # NaN値を除外（padding対応）
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            
+            if valid_mask.sum() > 0:
+                # 有効な位置のみで相関計算
+                pred_valid = pred_tf[valid_mask]  # [valid_positions, 4]
+                target_valid = target_tf[valid_mask]  # [valid_positions, 4]
+                
+                if pred_valid.numel() > 0:
+                    # ピアソン相関（4つのOHLC特徴量の平均）
+                    corr_ohlc = []
+                    for feat_idx in range(4):
+                        pred_feat = pred_valid[:, feat_idx]
+                        target_feat = target_valid[:, feat_idx]
+                        
+                        if pred_feat.numel() > 1:
+                            try:
+                                corr = torch.corrcoef(torch.stack([pred_feat, target_feat]))[0, 1]
+                                if not torch.isnan(corr):
+                                    corr_ohlc.append(corr)
+                            except RuntimeError:
+                                # corrcoef計算失敗時は0として扱う
+                                corr_ohlc.append(torch.tensor(0.0, device=pred_tf.device))
+                                
+                    if corr_ohlc:
+                        mean_corr = torch.mean(torch.stack(corr_ohlc))
+                        correlations[tf_name] = mean_corr
+                    else:
+                        correlations[tf_name] = torch.tensor(0.0, device=pred_tf.device)
+                else:
+                    correlations[tf_name] = torch.tensor(0.0, device=pred_tf.device)
+            else:
+                correlations[tf_name] = torch.tensor(0.0, device=pred_tf.device)
                 
         return correlations
     
@@ -636,6 +746,7 @@ def main():
     parser.add_argument('--val_gap_days', type=float, default=None, help='訓練と検証の間の時間的ギャップ（日数）')
     parser.add_argument('--eval_mask_ratio', type=float, default=None, help='評価時のマスク率 (0=マスクなし, 1=全マスク)')
     parser.add_argument('--mask_token_lr_scale', type=float, default=None, help='マスクトークンの学習率スケール (例: 0.1)')
+    parser.add_argument('--async_sampler', action='store_true', help='非同期マルチスケールモードを有効化 (Model v2)')
     parser.add_argument('--seeds', type=int, nargs='+', default=None, help='複数シード実行 (例: --seeds 42 123 2025)')
     
     args = parser.parse_args()
@@ -659,6 +770,11 @@ def main():
         if 'masking' not in config:
             config['masking'] = {}
         config['masking']['mask_token_lr_scale'] = args.mask_token_lr_scale
+    if args.async_sampler:
+        if 'model' not in config:
+            config['model'] = {}
+        config['model']['async_sampler'] = True
+        print("🔄 非同期マルチスケールモード (Model v2) 有効化")
     
     print("🚀 Stage 1 訓練開始")
     print(f"   設定ファイル: {args.config}")

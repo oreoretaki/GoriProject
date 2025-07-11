@@ -232,6 +232,67 @@ class TFNormalizer:
         
         return normalized
         
+    def normalize_single_tf(self, features: np.ndarray, tf_name: str) -> np.ndarray:
+        """
+        単一TFの特徴量を正規化（Model v2用）
+        
+        Args:
+            features: [seq_len, n_features] 特徴量配列
+            tf_name: タイムフレーム名
+            
+        Returns:
+            normalized: [seq_len, n_features] 正規化済み特徴量
+        """
+        if not self.stats:
+            raise ValueError("正規化統計が計算されていません。先にfit()またはload_stats()を実行してください。")
+            
+        if tf_name not in self.stats:
+            print(f"⚠️ {tf_name}の統計が見つかりません。正規化せずに返します。")
+            return features
+            
+        tf_stats = self.stats[tf_name]
+        mean = np.array(tf_stats['mean'])
+        std = np.array(tf_stats['std'])
+        
+        # z-score正規化: (x - mean) / std
+        normalized = (features - mean) / std
+        
+        # NaN/Inf処理
+        normalized = np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=-1.0)
+        
+        return normalized
+        
+    def normalize_targets_single_tf(self, targets: np.ndarray, tf_name: str) -> np.ndarray:
+        """
+        単一TFのターゲット（OHLC）を正規化（Model v2用）
+        
+        Args:
+            targets: [seq_len, 4] OHLCターゲット配列
+            tf_name: タイムフレーム名
+            
+        Returns:
+            normalized: [seq_len, 4] 正規化済みターゲット
+        """
+        if not self.stats:
+            raise ValueError("正規化統計が計算されていません。")
+            
+        if tf_name not in self.stats:
+            print(f"⚠️ {tf_name}の統計が見つかりません。正規化せずに返します。")
+            return targets
+            
+        tf_stats = self.stats[tf_name]
+        # OHLC用の統計（最初の4特徴量）
+        mean = np.array(tf_stats['mean'][:4])
+        std = np.array(tf_stats['std'][:4])
+        
+        # z-score正規化
+        normalized = (targets - mean) / std
+        
+        # NaN/Inf処理
+        normalized = np.nan_to_num(normalized, nan=0.0, posinf=1.0, neginf=-1.0)
+        
+        return normalized
+        
     def denormalize(self, normalized: torch.Tensor, tf_indices: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         正規化済みデータを元のスケールに戻す

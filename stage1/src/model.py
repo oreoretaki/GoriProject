@@ -23,6 +23,48 @@ except ImportError:
 # マスキング戦略インポート
 from .masking import MaskingStrategy
 
+
+class CrossScaleFusion(nn.Module):
+    """Coarse→Fine Cross-Attention for multi-scale fusion"""
+    
+    def __init__(self, d_model: int, num_heads: int = 8):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        
+        self.query_proj = nn.Linear(d_model, d_model)
+        self.key_proj = nn.Linear(d_model, d_model)
+        self.value_proj = nn.Linear(d_model, d_model)
+        self.attn = nn.MultiheadAttention(d_model, num_heads=num_heads, batch_first=True)
+        
+    def forward(self, coarse_features: torch.Tensor, fine_features: torch.Tensor, 
+                coarse_mask: Optional[torch.Tensor] = None, 
+                fine_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Cross-scale attention from coarse to fine timeframes
+        
+        Args:
+            coarse_features: [batch, seq_coarse, d_model] - coarse TF features
+            fine_features: [batch, seq_fine, d_model] - fine TF features  
+            coarse_mask: [batch, seq_coarse] - padding mask for coarse
+            fine_mask: [batch, seq_fine] - padding mask for fine
+            
+        Returns:
+            fused_features: [batch, d_model] - CLS token representation
+        """
+        # Use CLS token from coarse as query
+        q = self.query_proj(coarse_features[:, :1])  # [batch, 1, d_model]
+        k = self.key_proj(fine_features)  # [batch, seq_fine, d_model] 
+        v = self.value_proj(fine_features)  # [batch, seq_fine, d_model]
+        
+        # Cross-attention
+        fused, _ = self.attn(
+            q, k, v,
+            key_padding_mask=fine_mask  # Only mask fine features
+        )
+        
+        return fused.squeeze(1)  # [batch, d_model]
+
 class TFSpecificStem(nn.Module):
     """TF固有ステム: 1D depth-wise CNN"""
     
@@ -172,14 +214,20 @@ class SharedEncoder(nn.Module):
             for _ in range(self.n_layers // self.cross_attn_every)
         ])
         
-    def forward(self, tf_features: torch.Tensor, masks: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, tf_features: torch.Tensor, masks: Optional[torch.Tensor] = None, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Args:
-            tf_features: [batch, n_tf, seq_len, d_model]
-            masks: [batch, n_tf, seq_len] padding masks (optional, auto-generated from NaN)
+            tf_features: [batch, n_tf, seq_len, d_model] or [batch, seq_len, d_model] (async mode)
+            masks: [batch, n_tf, seq_len] padding masks (legacy)
+            key_padding_mask: [batch, seq_len] padding mask (async mode)
         Returns:
-            encoded: [batch, n_tf, seq_len, d_model]
+            encoded: [batch, n_tf, seq_len, d_model] or [batch, seq_len, d_model]
         """
+        # async mode support: 3D input
+        if tf_features.dim() == 3:
+            return self._forward_single_tf(tf_features, key_padding_mask)
+        
+        # legacy mode: 4D input
         batch_size, n_tf, seq_len, d_model = tf_features.shape
         
         # 🔥 NaN-paddedシーケンス用のattention_mask自動生成
@@ -205,6 +253,37 @@ class SharedEncoder(nn.Module):
                 tf_features = tf_features + self.cross_attn_layers[cross_idx](tf_features)
                 
         return tf_features
+    
+    def _forward_single_tf(self, tf_features: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        単一TF用forward (async mode)
+        
+        Args:
+            tf_features: [batch, seq_len, d_model]
+            key_padding_mask: [batch, seq_len] padding mask (True=valid, False=padded)
+        Returns:
+            encoded: [batch, seq_len, d_model]
+        """
+        batch_size, seq_len, d_model = tf_features.shape
+        
+        # padding maskの処理
+        if key_padding_mask is not None:
+            # key_padding_maskは通常True=valid, False=paddedだが、
+            # attention maskとしてはTrue=masked, False=validが必要
+            attention_mask = key_padding_mask  # そのまま使用
+        else:
+            # NaN値を検出してpadding maskを作成
+            attention_mask = torch.isnan(tf_features).any(dim=-1)  # [batch, seq_len]
+        
+        # Process through transformer layers
+        encoded = tf_features
+        for layer_idx, layer in enumerate(self.layers):
+            # Self-attention within the TF
+            encoded = layer(encoded, attention_mask)
+            
+            # Note: Cross-scale attention is not applied in single TF mode
+            
+        return encoded
 
 class Bottleneck(nn.Module):
     """Bottleneck: 全域コンテキスト圧縮"""
@@ -277,7 +356,10 @@ class TFDecoder(nn.Module):
         # [batch, latent_len, d_model] -> [batch, d_model, latent_len]
         x = x.transpose(1, 2)
         
-        # Upsample
+        # Upsample (latent_len=1対応)
+        if latent_len == 1:
+            # latent_len=1の場合: repeat→upsample
+            x = x.repeat(1, 1, 16)  # [batch, d_model, 16] へ拡張
         x = self.upsample(x)
         
         # Decoder layers
@@ -311,11 +393,23 @@ class Stage1Model(nn.Module):
         self.d_model = config['model']['tf_stem']['d_model']
         self.latent_len = config['model']['bottleneck']['latent_len']
         
-        # TF-specific stems
-        self.tf_stems = nn.ModuleList([
-            TFSpecificStem(self.n_features, self.d_model, config['model']['tf_stem']['kernel_size'])
-            for _ in range(self.n_tf)
-        ])
+        # Model v2: async mode support
+        self.async_sampler = config.get('model', {}).get('async_sampler', False)
+        self.timeframes = config.get('data', {}).get('timeframes', ['m1', 'm5', 'm15', 'm30', 'h1', 'h4'])
+        
+        # TF-specific stems (now using ModuleDict for variable TFs)
+        if self.async_sampler:
+            # Dict-based stems for variable timeframes
+            self.tf_stems = nn.ModuleDict({
+                tf: TFSpecificStem(self.n_features, self.d_model, config['model']['tf_stem']['kernel_size'])
+                for tf in self.timeframes
+            })
+        else:
+            # List-based stems for fixed timeframes
+            self.tf_stems = nn.ModuleList([
+                TFSpecificStem(self.n_features, self.d_model, config['model']['tf_stem']['kernel_size'])
+                for _ in range(self.n_tf)
+            ])
         
         # Shared encoder (T5転移学習またはバニラエンコーダー)
         use_pretrained_lm = config.get('transfer_learning', {}).get('use_pretrained_lm', False)
@@ -327,10 +421,31 @@ class Stage1Model(nn.Module):
                     "pip install transformers>=4.42.0 でインストールしてください。"
                 )
             print("🤗 T5転移学習を使用します")
-            self.shared_encoder = T5TimeSeriesAdapter(config)
+            if self.async_sampler:
+                # TF-specific encoders for async mode
+                self.encoders = nn.ModuleDict({
+                    tf: T5TimeSeriesAdapter(config) for tf in self.timeframes
+                })
+            else:
+                self.shared_encoder = T5TimeSeriesAdapter(config)
         else:
             print("📦 従来のSharedEncoderを使用します")
-            self.shared_encoder = SharedEncoder(config)
+            if self.async_sampler:
+                # TF-specific encoders for async mode
+                self.encoders = nn.ModuleDict({
+                    tf: SharedEncoder(config) for tf in self.timeframes
+                })
+            else:
+                self.shared_encoder = SharedEncoder(config)
+        
+        # Cross-scale fusion for async mode
+        if self.async_sampler:
+            cross_pairs = config.get('model', {}).get('cross_pairs', [["h4", "m1"], ["h1", "m1"], ["m30", "m1"]])
+            self.cross_fusion = nn.ModuleDict({
+                f"{coarse}_{fine}": CrossScaleFusion(self.d_model)
+                for coarse, fine in cross_pairs
+            })
+            self.cross_pairs = cross_pairs
         
         # Bottleneck
         self.bottleneck = Bottleneck(
@@ -340,10 +455,18 @@ class Stage1Model(nn.Module):
         )
         
         # TF-specific decoders
-        self.tf_decoders = nn.ModuleList([
-            TFDecoder(self.d_model, self.seq_len, n_output_features=4, n_layers=config['model']['decoder']['n_layers'])
-            for _ in range(self.n_tf)
-        ])
+        if self.async_sampler:
+            # Dict-based decoders for variable timeframes
+            self.tf_decoders = nn.ModuleDict({
+                tf: TFDecoder(self.d_model, self.seq_len, n_output_features=4, n_layers=config['model']['decoder']['n_layers'])
+                for tf in self.timeframes
+            })
+        else:
+            # List-based decoders for fixed timeframes
+            self.tf_decoders = nn.ModuleList([
+                TFDecoder(self.d_model, self.seq_len, n_output_features=4, n_layers=config['model']['decoder']['n_layers'])
+                for _ in range(self.n_tf)
+            ])
         
         # 🔥 Learnable Mask Token Strategy
         self.masking_strategy = MaskingStrategy(config, n_features=self.n_features)
@@ -355,82 +478,190 @@ class Stage1Model(nn.Module):
         """位置エンコーディング作成"""
         return nn.Embedding(self.seq_len, self.d_model)
         
-    def forward(self, features: torch.Tensor, masks: Optional[torch.Tensor] = None, training_masks: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+    def forward(self, batch: Dict[str, torch.Tensor], eval_mask_ratio: Optional[float] = None) -> Dict[str, torch.Tensor]:
         """
+        Model v2: Dict input support for variable-length multi-timeframe processing
+        
         Args:
-            features: [batch, n_tf, seq_len, n_features] 入力特徴量（生データ）
-            masks: [batch, n_tf, seq_len] パディング/マスクマスク（従来）
-            training_masks: [batch, n_tf, seq_len] 自己教師ありマスク（新規）
+            batch: {
+                'm1': [B, L_m1, F],
+                'm5': [B, L_m5, F],
+                ...
+            } - Dict of timeframe tensors with variable lengths (NaN-padded)
+            eval_mask_ratio: Override mask ratio for evaluation (fixes val_corr=0 issue)
             
         Returns:
-            outputs: {
-                'reconstructed': [batch, n_tf, seq_len, 4] 再構築されたOHLC,
-                'encoded': [batch, n_tf, latent_len, d_model] エンコード済み表現,
-                'masked_features': [batch, n_tf, seq_len, n_features] マスク適用済み特徴量,
-                'training_masks': [batch, n_tf, seq_len] 生成されたマスク
-            }
+            outputs: Dict[str, torch.Tensor] - Same keys as input, values are [B, L_tf, 4]
         """
-        batch_size, n_tf, seq_len, n_features = features.shape
+        if self.async_sampler:
+            return self._forward_async(batch, eval_mask_ratio)
+        else:
+            return self._forward_sync(batch, eval_mask_ratio)
+    
+    def _forward_async(self, batch: Dict[str, torch.Tensor], eval_mask_ratio: Optional[float] = None) -> Dict[str, torch.Tensor]:
+        """Async mode forward pass with variable-length support"""
+        encoded = {}
+        padding_masks = {}
+        training_masks = {}
         
+        # 1-A. TFごと前処理（stem → encoder）
+        for tf, x in batch.items():
+            # NaN detection for padding mask
+            mask = torch.isnan(x[..., 0])  # [B, L] - use first feature to detect NaN
+            x_clean = torch.nan_to_num(x, nan=0.0)  # NaN → 0
+            
+            # Apply self-supervised masking BEFORE stem processing
+            if self.training or eval_mask_ratio is not None:
+                # Generate training masks for this TF
+                mask_ratio = eval_mask_ratio if eval_mask_ratio is not None else 0.15
+                tf_training_mask = self._generate_tf_masks(x_clean, mask_ratio)
+                # Apply masking to input features (before stem)
+                x_masked_input = self._apply_tf_masks(x_clean, tf_training_mask)
+                training_masks[tf] = tf_training_mask
+            else:
+                x_masked_input = x_clean
+                training_masks[tf] = torch.zeros_like(mask, dtype=torch.bool)
+            
+            # TF-specific stem processing (after masking)
+            x_stem = self.tf_stems[tf](x_masked_input)  # [B, L, d_model]
+            
+            # TF-specific encoder
+            encoded_features = self.encoders[tf](x_stem, key_padding_mask=mask)
+            encoded[tf] = encoded_features  # [B, L, d_model]
+            padding_masks[tf] = mask
+        
+        # 1-B. Cross-scale Fusion (coarse→fine)
+        fused_cls = {}
+        if hasattr(self, 'cross_fusion') and self.cross_fusion:
+            for coarse, fine in self.cross_pairs:
+                if coarse in encoded and fine in encoded:
+                    key = f"{coarse}_{fine}"
+                    if key in self.cross_fusion:
+                        fused_cls[fine] = self.cross_fusion[key](
+                            encoded[coarse], encoded[fine],
+                            padding_masks[coarse], padding_masks[fine]
+                        )
+        
+        # 1-C. Bottleneck + Decoder  
+        outputs = {}
+        for tf, z in encoded.items():
+            # Async mode用の修正されたBottleneck処理
+            # z: [B, L, d_model] → mean-pooling → [B, d_model] → MLP → [B, latent_len, d_model]
+            
+            valid_mask = ~padding_masks[tf]  # [B, L]
+            if valid_mask.sum() > 0:
+                # Mean pooling over valid positions
+                z_pool = (z * valid_mask.unsqueeze(-1)).sum(dim=1) / valid_mask.sum(dim=1, keepdim=True)  # [B, d_model]
+            else:
+                z_pool = z.mean(dim=1)  # Fallback to regular mean
+            
+            # Async mode用の簡略化bottleneck: ダイレクトMLP
+            batch_size = z_pool.size(0)
+            # z_pool: [B, d_model] → [B, 1, d_model] (単一latent)
+            z_latent = z_pool.unsqueeze(1)  # [B, 1, d_model]
+            
+            # TF-specific decoder (latent_len=1として処理)
+            outputs[tf] = self.tf_decoders[tf](z_latent)  # [B, seq_len, 4]
+        
+        return outputs
+    
+    def _forward_sync(self, batch: Dict[str, torch.Tensor], eval_mask_ratio: Optional[float] = None) -> Dict[str, torch.Tensor]:
+        """Legacy sync mode forward pass - convert Dict to tensor format"""
+        # Convert Dict format to legacy tensor format for backward compatibility
+        timeframes = list(batch.keys())
+        
+        # Find maximum sequence length and batch size
+        batch_size = list(batch.values())[0].shape[0]
+        max_seq_len = max(x.shape[1] for x in batch.values())
+        n_features = list(batch.values())[0].shape[2]
+        n_tf = len(timeframes)
+        
+        # Pad all sequences to max length and stack
+        features = torch.full((batch_size, n_tf, max_seq_len, n_features), 
+                            float('nan'), device=list(batch.values())[0].device)
+        
+        for i, (tf, x) in enumerate(batch.items()):
+            seq_len = x.shape[1]
+            features[:, i, :seq_len, :] = x
+        
+        # Use legacy forward logic
         # 🔥 自己教師ありマスキング処理
-        if training_masks is None and self.training:
-            # 訓練時：各サンプルに対してマスクを生成（再現性担保）
+        training_masks = None
+        if self.training or eval_mask_ratio is not None:
+            mask_ratio = eval_mask_ratio if eval_mask_ratio is not None else 0.15
             training_masks = torch.stack([
                 self.masking_strategy.generate_masks(
                     features[b], 
-                    seed=hash((id(features), b)) % 2147483647  # 再現性担保
-                )  # [n_tf, seq_len]
+                    seed=hash((id(features), b)) % 2147483647,
+                    mask_ratio=mask_ratio
+                ) 
                 for b in range(batch_size)
-            ], dim=0)  # [batch, n_tf, seq_len]
+            ], dim=0)
         
-        # マスクされた特徴量を生成
+        # Apply masking
         if training_masks is not None:
             masked_features = torch.stack([
                 self.masking_strategy.apply_mask_to_features(features[b], training_masks[b])
                 for b in range(batch_size)
-            ], dim=0)  # [batch, n_tf, seq_len, n_features]
+            ], dim=0)
         else:
-            # 推論時またはマスクなし
             masked_features = features
-            training_masks = torch.zeros(batch_size, n_tf, seq_len, device=features.device, dtype=torch.bool)
+            training_masks = torch.zeros(batch_size, n_tf, max_seq_len, device=features.device, dtype=torch.bool)
         
-        # Shared encoding（マスク済み特徴量を使用）
-        if isinstance(self.shared_encoder, T5TimeSeriesAdapter):
-            # T5アダプターはマスク済み特徴量を使用
-            encoded = self.shared_encoder(masked_features)  # [batch, n_tf, seq_len, d_model]
-        else:
-            # 従来のSharedEncoder: TF-specific stem processing
-            tf_embeddings = []
-            for i in range(n_tf):
-                stem_out = self.tf_stems[i](masked_features[:, i])  # [batch, seq_len, d_model]
-                tf_embeddings.append(stem_out)
+        # Process through model
+        if hasattr(self, 'shared_encoder'):
+            if isinstance(self.shared_encoder, T5TimeSeriesAdapter):
+                encoded = self.shared_encoder(masked_features)
+            else:
+                tf_embeddings = []
+                for i in range(n_tf):
+                    stem_out = self.tf_stems[i](masked_features[:, i])
+                    tf_embeddings.append(stem_out)
+                tf_embeddings = torch.stack(tf_embeddings, dim=1)
                 
-            tf_embeddings = torch.stack(tf_embeddings, dim=1)  # [batch, n_tf, seq_len, d_model]
-            
-            # Add positional encoding
-            pos_ids = torch.arange(seq_len, device=masked_features.device).unsqueeze(0).expand(batch_size, -1)
-            pos_emb = self.pos_encoding(pos_ids).unsqueeze(1)  # [batch, 1, seq_len, d_model]
-            tf_embeddings = tf_embeddings + pos_emb
-            
-            encoded = self.shared_encoder(tf_embeddings, masks)  # [batch, n_tf, seq_len, d_model]
+                pos_ids = torch.arange(max_seq_len, device=masked_features.device).unsqueeze(0).expand(batch_size, -1)
+                pos_emb = self.pos_encoding(pos_ids).unsqueeze(1)
+                tf_embeddings = tf_embeddings + pos_emb
+                
+                encoded = self.shared_encoder(tf_embeddings)
         
-        # Bottleneck
-        compressed = self.bottleneck(encoded)  # [batch, n_tf, latent_len, d_model]
+        compressed = self.bottleneck(encoded)
         
-        # TF-specific decoding
         reconstructed = []
         for i in range(n_tf):
-            decoded = self.tf_decoders[i](compressed[:, i])  # [batch, seq_len, 4]
+            decoded = self.tf_decoders[i](compressed[:, i])
             reconstructed.append(decoded)
-            
-        reconstructed = torch.stack(reconstructed, dim=1)  # [batch, n_tf, seq_len, 4]
+        reconstructed = torch.stack(reconstructed, dim=1)
         
-        return {
-            'reconstructed': reconstructed,
-            'encoded': compressed,
-            'masked_features': masked_features,
-            'training_masks': training_masks
-        }
+        # Convert back to Dict format
+        outputs = {}
+        for i, tf in enumerate(timeframes):
+            seq_len = batch[tf].shape[1]
+            outputs[tf] = reconstructed[:, i, :seq_len, :]
+        
+        return outputs
+    
+    def _generate_tf_masks(self, x: torch.Tensor, mask_ratio: float = 0.15) -> torch.Tensor:
+        """Generate self-supervised masks for a single TF"""
+        batch_size, seq_len, _ = x.shape
+        
+        # Simple random masking for now
+        masks = torch.rand(batch_size, seq_len, device=x.device) < mask_ratio
+        return masks
+    
+    def _apply_tf_masks(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Apply masks to features using learnable mask tokens"""
+        # Apply mask (set masked positions to 0 or use learnable mask token)
+        masked_x = x.clone()
+        if hasattr(self.masking_strategy, 'mask_token'):
+            # Use learnable mask token
+            mask_token = self.masking_strategy.mask_token.expand_as(x)
+            masked_x = torch.where(mask.unsqueeze(-1), mask_token, x)
+        else:
+            # Simple masking to zero
+            masked_x = torch.where(mask.unsqueeze(-1), torch.zeros_like(x), x)
+        
+        return masked_x
         
     def get_model_info(self) -> Dict:
         """モデル情報を取得"""

@@ -71,6 +71,34 @@ class FeatureEngineer:
             
         return features, targets
         
+    def process_single_tf_window(self, tf_name: str, tf_window_df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        単一TFのウィンドウデータを特徴量とターゲットに変換（Model v2用）
+        
+        Args:
+            tf_name: タイムフレーム名
+            tf_window_df: 単一TFのDataFrame
+            
+        Returns:
+            features: [seq_len, n_features] 特徴量配列
+            targets: [seq_len, 4] ターゲット（OHLC）配列
+        """
+        if len(tf_window_df) == 0:
+            return np.zeros((0, self.n_features)), np.zeros((0, 4))
+            
+        # OHLC抽出（列名存在チェック）
+        required_columns = ['open', 'high', 'low', 'close']
+        missing_columns = [col for col in required_columns if col not in tf_window_df.columns]
+        if missing_columns:
+            raise KeyError(f"TF {tf_name}: 必要な列が見つかりません: {missing_columns}. 利用可能な列: {list(tf_window_df.columns)}")
+        
+        ohlc = tf_window_df[required_columns].values
+        
+        # 特徴量計算
+        features = self._calculate_features(tf_window_df)
+        
+        return features, ohlc
+        
     def _calculate_features(self, df: pd.DataFrame) -> np.ndarray:
         """
         単一TFのDataFrameから6特徴量を計算
@@ -84,7 +112,12 @@ class FeatureEngineer:
         seq_len = len(df)
         features = np.zeros((seq_len, self.n_features))
         
-        # 基本OHLC
+        # 基本OHLC（列名存在チェック）
+        required_columns = ['open', 'high', 'low', 'close']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise KeyError(f"特徴量計算: 必要な列が見つかりません: {missing_columns}. 利用可能な列: {list(df.columns)}")
+        
         features[:, 0] = df['open'].values      # open
         features[:, 1] = df['high'].values      # high
         features[:, 2] = df['low'].values       # low

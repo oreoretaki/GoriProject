@@ -279,17 +279,17 @@ class Stage1CombinedLoss(nn.Module):
         
     def forward(
         self, 
-        pred: torch.Tensor, 
-        target: torch.Tensor, 
-        masks: torch.Tensor,
-        m1_data: torch.Tensor = None
+        pred, 
+        target, 
+        masks,
+        m1_data = None
     ) -> Dict[str, torch.Tensor]:
         """
         Args:
-            pred: [batch, n_tf, seq_len, 4] 予測OHLC
-            target: [batch, n_tf, seq_len, 4] 正解OHLC  
-            masks: [batch, n_tf, seq_len] マスク
-            m1_data: [batch, seq_len, 4] M1データ（クロス損失用）
+            pred: [batch, n_tf, seq_len, 4] 予測OHLC または Dict[str, torch.Tensor]
+            target: [batch, n_tf, seq_len, 4] 正解OHLC または Dict[str, torch.Tensor]
+            masks: [batch, n_tf, seq_len] マスク または Dict[str, torch.Tensor]
+            m1_data: [batch, seq_len, 4] M1データ（クロス損失用）または Dict[str, torch.Tensor]
             
         Returns:
             losses: {
@@ -300,6 +300,11 @@ class Stage1CombinedLoss(nn.Module):
                 'amp_phase': 振幅位相損失
             }
         """
+        # Dict format support for Model v2
+        if isinstance(pred, dict):
+            return self._forward_dict(pred, target, masks, m1_data)
+        
+        # Legacy tensor format support
         
         # 各損失計算
         recon_loss = self.huber_loss(pred, target, masks)
@@ -327,3 +332,304 @@ class Stage1CombinedLoss(nn.Module):
             'cross': cross_loss,
             'amp_phase': amp_phase_loss
         }
+    
+    def _forward_dict(
+        self,
+        pred: Dict[str, torch.Tensor],
+        target: Dict[str, torch.Tensor], 
+        masks: Dict[str, torch.Tensor],
+        m1_data: Dict[str, torch.Tensor] = None
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Dict形式の入力に対する損失計算 (Model v2用)
+        
+        Args:
+            pred: Dict[tf_name, torch.Tensor] - 各TFの予測 [batch, seq_len, 4]
+            target: Dict[tf_name, torch.Tensor] - 各TFの正解 [batch, seq_len, 4]
+            masks: Dict[tf_name, torch.Tensor] - 各TFのマスク [batch, seq_len]
+            m1_data: Dict[tf_name, torch.Tensor] - M1データ（クロス損失用）
+            
+        Returns:
+            losses: Dict[str, torch.Tensor] - 各損失の辞書
+        """
+        device = list(pred.values())[0].device
+        
+        # 各損失計算
+        recon_loss = self._huber_loss_dict(pred, target, masks)
+        spec_loss = self._stft_loss_dict(pred, target, masks)
+        amp_phase_loss = self._amp_phase_loss_dict(pred, target)
+        
+        # クロス損失（M1データが提供された場合のみ）
+        if m1_data is not None and 'm1' in pred:
+            cross_loss = self._cross_loss_dict(pred, m1_data)
+        else:
+            cross_loss = torch.tensor(0.0, device=device)
+            
+        # 重み付き総損失
+        total_loss = (
+            self.weights['recon_tf'] * recon_loss +
+            self.weights['spec_tf'] * spec_loss +
+            self.weights['cross'] * cross_loss +
+            self.weights['amp_phase'] * amp_phase_loss
+        )
+        
+        return {
+            'total': total_loss,
+            'recon_tf': recon_loss,
+            'spec_tf': spec_loss, 
+            'cross': cross_loss,
+            'amp_phase': amp_phase_loss
+        }
+    
+    def _huber_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor], masks: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Dict形式のHuber損失計算"""
+        total_loss = 0.0
+        total_count = 0
+        
+        for tf_name, pred_tf in pred.items():
+            if tf_name not in target:
+                continue
+                
+            target_tf = target[tf_name]
+            mask_tf = masks.get(tf_name, None)
+            
+            # NaN値を除外（padding対応）
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            if mask_tf is not None:
+                valid_mask = valid_mask & ~mask_tf  # マスクされた位置も除外
+            
+            if valid_mask.sum() == 0:
+                continue
+                
+            # 有効な位置のみで損失計算
+            pred_valid = pred_tf[valid_mask]  # [valid_positions, 4]
+            target_valid = target_tf[valid_mask]  # [valid_positions, 4]
+            
+            loss = F.huber_loss(pred_valid, target_valid, delta=self.huber_loss.delta, reduction='mean')
+            total_loss += loss
+            total_count += 1
+            
+        return total_loss / max(total_count, 1)
+    
+    def _stft_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor], masks: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Dict形式のSTFT損失計算"""
+        total_loss = 0.0
+        total_count = 0
+        
+        for tf_name, pred_tf in pred.items():
+            if tf_name not in target:
+                continue
+                
+            target_tf = target[tf_name]
+            mask_tf = masks.get(tf_name, None)
+            
+            batch_size, seq_len, n_features = pred_tf.shape
+            
+            # NaN値を除外（padding対応）
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            if mask_tf is not None:
+                valid_mask = valid_mask & ~mask_tf  # マスクされた位置も除外
+            
+            for feat_idx in range(n_features):
+                pred_signal = pred_tf[:, :, feat_idx]  # [batch, seq_len]
+                target_signal = target_tf[:, :, feat_idx]  # [batch, seq_len]
+                
+                # 各バッチで有効な部分のみ取得
+                for b in range(batch_size):
+                    valid_positions = valid_mask[b]
+                    if valid_positions.sum() == 0:
+                        continue
+                        
+                    pred_seq = pred_signal[b, valid_positions]  # [valid_len]
+                    target_seq = target_signal[b, valid_positions]  # [valid_len]
+                    
+                    if len(pred_seq) < 64:  # STFT計算に必要な最小長
+                        continue
+                        
+                    # 各スケールでSTFT損失計算
+                    for scale in self.stft_loss.scales:
+                        if len(pred_seq) < scale:
+                            continue
+                            
+                        hop_length = int(scale * self.stft_loss.hop_ratio)
+                        
+                        # STFT計算
+                        pred_seq_32 = pred_seq.to(torch.float32)
+                        target_seq_32 = target_seq.to(torch.float32)
+                        pred_stft = torch.stft(
+                            pred_seq_32, 
+                            n_fft=scale, 
+                            hop_length=hop_length, 
+                            return_complex=True
+                        )
+                        target_stft = torch.stft(
+                            target_seq_32, 
+                            n_fft=scale, 
+                            hop_length=hop_length, 
+                            return_complex=True
+                        )
+                        
+                        # マグニチュード損失
+                        pred_mag = torch.abs(pred_stft)
+                        target_mag = torch.abs(target_stft)
+                        mag_loss = F.l1_loss(pred_mag, target_mag)
+                        
+                        # 位相損失
+                        phase_loss = F.l1_loss(pred_stft.real, target_stft.real) + \
+                                    F.l1_loss(pred_stft.imag, target_stft.imag)
+                        
+                        total_loss += mag_loss + 0.1 * phase_loss
+                        total_count += 1
+                        
+        return total_loss / max(total_count, 1)
+    
+    def _amp_phase_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Dict形式の振幅位相損失計算"""
+        total_loss = 0.0
+        total_count = 0
+        
+        for tf_name, pred_tf in pred.items():
+            if tf_name not in target:
+                continue
+                
+            target_tf = target[tf_name]
+            batch_size, seq_len, n_features = pred_tf.shape
+            
+            # NaN値を除外（padding対応）
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            
+            for feat_idx in range(n_features):
+                pred_signal = pred_tf[:, :, feat_idx]  # [batch, seq_len]
+                target_signal = target_tf[:, :, feat_idx]  # [batch, seq_len]
+                
+                # 各バッチで有効な部分のみ取得
+                for b in range(batch_size):
+                    valid_positions = valid_mask[b]
+                    if valid_positions.sum() == 0:
+                        continue
+                        
+                    pred_seq = pred_signal[b, valid_positions]  # [valid_len]
+                    target_seq = target_signal[b, valid_positions]  # [valid_len]
+                    
+                    if len(pred_seq) < 8:  # FFT計算に必要な最小長
+                        continue
+                        
+                    # FFT計算
+                    pred_seq_32 = pred_seq.to(torch.float32)
+                    target_seq_32 = target_seq.to(torch.float32)
+                    pred_fft = torch.fft.fft(pred_seq_32)
+                    target_fft = torch.fft.fft(target_seq_32)
+                    
+                    # 振幅・位相
+                    pred_amp = torch.abs(pred_fft)
+                    target_amp = torch.abs(target_fft)
+                    pred_phase = torch.angle(pred_fft)
+                    target_phase = torch.angle(target_fft)
+                    
+                    # 相関損失
+                    amp_corr = self.amp_phase_loss._correlation_loss(pred_amp.unsqueeze(0), target_amp.unsqueeze(0))
+                    phase_corr = self.amp_phase_loss._correlation_loss(pred_phase.unsqueeze(0), target_phase.unsqueeze(0))
+                    
+                    total_loss += amp_corr + phase_corr
+                    total_count += 1
+                    
+        return total_loss / max(total_count, 1)
+    
+    def _cross_loss_dict(self, pred: Dict[str, torch.Tensor], m1_data: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Dict形式のクロス整合性損失計算"""
+        if 'm1' not in pred or 'm1' not in m1_data:
+            return torch.tensor(0.0, device=list(pred.values())[0].device)
+            
+        pred_m1 = pred['m1']  # [batch, seq_len, 4]
+        m1_ref = m1_data['m1']  # [batch, seq_len, 4]
+        
+        total_loss = 0.0
+        total_count = 0
+        
+        # M1以外のTFについて、対応するM1集約と比較
+        tf_intervals = {'m5': 5, 'm15': 15, 'm30': 30, 'h1': 60, 'h4': 240}
+        
+        for tf_name, pred_tf in pred.items():
+            if tf_name == 'm1' or tf_name not in tf_intervals:
+                continue
+                
+            interval = tf_intervals[tf_name]
+            
+            # M1から期待される集約値を計算
+            expected_tf = self._aggregate_m1_to_tf_dict(m1_ref, interval, pred_tf.shape[1])
+            
+            # NaN値を除外
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            if valid_mask.sum() == 0:
+                continue
+                
+            # 有効な位置のみで損失計算
+            pred_valid = pred_tf[valid_mask]  # [valid_positions, 4]
+            expected_valid = expected_tf[valid_mask]  # [valid_positions, 4]
+            
+            tf_loss = F.mse_loss(pred_valid, expected_valid)
+            total_loss += tf_loss
+            total_count += 1
+            
+        return total_loss / max(total_count, 1)
+    
+    def _aggregate_m1_to_tf_dict(self, m1_data: torch.Tensor, interval: int, target_len: int) -> torch.Tensor:
+        """
+        Dict形式のM1データを指定間隔で集約
+        
+        Args:
+            m1_data: [batch, seq_len, 4] M1 OHLC
+            interval: 集約間隔
+            target_len: 出力シーケンス長
+            
+        Returns:
+            aggregated: [batch, target_len, 4] 集約済みOHLC
+        """
+        # staticmethod版を直接実装（再帰回避）
+        return self._aggregate_m1_to_tf_static(m1_data, interval, target_len)
+    
+    @staticmethod
+    def _aggregate_m1_to_tf_static(m1_data: torch.Tensor, interval: int, target_len: int) -> torch.Tensor:
+        """
+        M1データを指定間隔で集約（static版）
+        """
+        batch_size, seq_len, _ = m1_data.shape
+        
+        # 簡易集約（実際にはより精密な実装が必要）
+        if interval >= seq_len:
+            # 全期間集約
+            open_val = m1_data[:, 0, 0:1]  # 最初の始値
+            high_val = m1_data[:, :, 1].max(dim=1, keepdim=True)[0]  # 最高値
+            low_val = m1_data[:, :, 2].min(dim=1, keepdim=True)[0]  # 最安値
+            close_val = m1_data[:, -1, 3:4]  # 最後の終値
+            
+            aggregated_bar = torch.cat([open_val, high_val, low_val, close_val], dim=1)
+            return aggregated_bar.unsqueeze(1).expand(-1, target_len, -1)
+        else:
+            # 区間ごとに集約
+            n_chunks = target_len
+            chunk_size = seq_len // n_chunks
+            
+            aggregated = []
+            for i in range(n_chunks):
+                start_idx = i * chunk_size
+                end_idx = min((i + 1) * chunk_size, seq_len)
+                
+                if start_idx >= seq_len:
+                    # パディング
+                    last_bar = aggregated[-1] if aggregated else m1_data[:, -1]
+                    aggregated.append(last_bar)
+                else:
+                    chunk = m1_data[:, start_idx:end_idx]
+                    if chunk.size(1) == 0:
+                        chunk = m1_data[:, -1:] 
+                        
+                    open_val = chunk[:, 0, 0]  # 最初の始値
+                    high_val = chunk[:, :, 1].max(dim=1)[0]  # 最高値
+                    low_val = chunk[:, :, 2].min(dim=1)[0]  # 最安値  
+                    close_val = chunk[:, -1, 3]  # 最後の終値
+                    
+                    bar = torch.stack([open_val, high_val, low_val, close_val], dim=1)
+                    aggregated.append(bar)
+                    
+            return torch.stack(aggregated, dim=1)  # [batch, n_chunks, 4]

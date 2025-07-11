@@ -194,7 +194,8 @@ class MultiTFWindowSampler:
         val_split: float = 0.2,
         min_coverage: float = 0.8,
         cache_dir: Optional[str] = None,
-        val_gap_days: float = 1.0
+        val_gap_days: float = 1.0,
+        async_sampler: bool = False
     ):
         """
         Args:
@@ -205,6 +206,7 @@ class MultiTFWindowSampler:
             min_coverage: 最小データカバレッジ（全TFでデータが存在する割合）
             cache_dir: キャッシュディレクトリ
             val_gap_days: 訓練と検証の間の時間的ギャップ（日数）
+            async_sampler: 非同期サンプリングモード（各TF独立）
         """
         self.tf_data = tf_data
         self.seq_len = seq_len
@@ -213,11 +215,13 @@ class MultiTFWindowSampler:
         self.min_coverage = min_coverage
         self.cache_dir = Path(cache_dir) if cache_dir else Path("./cache")
         self.val_gap_days = val_gap_days
+        self.async_sampler = async_sampler
         
         # タイムフレーム名リスト
         self.timeframes = list(tf_data.keys())
         
-        print(f"🔄 MultiTFWindowSampler初期化 ({split}) - ラッパー版")
+        mode_str = "非同期版" if async_sampler else "ラッパー版"
+        print(f"🔄 MultiTFWindowSampler初期化 ({split}) - {mode_str}")
         print(f"   TF数: {len(self.timeframes)}")
         print(f"   TF: {self.timeframes}")
         
@@ -250,30 +254,49 @@ class MultiTFWindowSampler:
         # 有効なTFリストを更新
         self.timeframes = valid_timeframes
         
-        # 最小サンプル数を安全に計算
-        self.min_samples = min(sample_counts) if sample_counts else 0
+        # サンプル数の計算（モードによって異なる）
+        if async_sampler:
+            # 非同期モード: 最大サンプル数を使用（各TFが独立）
+            self.total_samples = max(sample_counts) if sample_counts else 0
+            self.min_samples = min(sample_counts) if sample_counts else 0
+        else:
+            # 同期モード: 最小サンプル数を使用（全TF同期）
+            self.total_samples = min(sample_counts) if sample_counts else 0
+            self.min_samples = self.total_samples
         
-        if self.min_samples == 0:
+        if self.total_samples == 0:
             raise ValueError("全TFでサンプル数0 - データローダーを作成できません")
         
         print(f"📊 MultiTFWindowSampler統計:")
         print(f"   有効TF数: {len(self.timeframes)}")
         print(f"   有効TF: {self.timeframes}")
-        print(f"   最小サンプル数: {self.min_samples:,}")
+        if async_sampler:
+            print(f"   最大サンプル数: {self.total_samples:,}")
+            print(f"   最小サンプル数: {self.min_samples:,}")
+        else:
+            print(f"   最小サンプル数: {self.min_samples:,}")
     
     def __len__(self) -> int:
-        """最小サンプル数を返す（全TFで同期）"""
-        return self.min_samples
+        """総サンプル数を返す（モードによって異なる）"""
+        return self.total_samples
     
     def __getitem__(self, idx: int) -> Dict[str, pd.DataFrame]:
-        """全TFの同期ウィンドウデータを取得"""
-        if idx >= self.min_samples:
-            raise IndexError(f"Index {idx} out of range for {self.min_samples} synchronized windows")
+        """ウィンドウデータを取得（モードによって異なる）"""
+        if idx >= self.total_samples:
+            raise IndexError(f"Index {idx} out of range for {self.total_samples} windows")
         
         # 各TFからウィンドウデータを取得
         tf_windows = {}
         for tf_name in self.timeframes:
             sampler = self.tf_samplers[tf_name]
-            tf_windows[tf_name] = sampler[idx]
+            
+            if self.async_sampler:
+                # 非同期モード: 循環インデックス（idx % len_tf）
+                tf_idx = idx % len(sampler)
+            else:
+                # 同期モード: 直接インデックス
+                tf_idx = idx
+                
+            tf_windows[tf_name] = sampler[tf_idx]
         
         return tf_windows

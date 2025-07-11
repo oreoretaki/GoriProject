@@ -8,13 +8,83 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 import numpy as np
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 import os
 from pathlib import Path
+from collections import defaultdict
 
 from .window_sampler import MultiTFWindowSampler
 from .feature_engineering import FeatureEngineer
 from .normalization import TFNormalizer
+
+
+def collate_multiscale(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+    """
+    可変長バッチのための collate 関数（Model v2対応）
+    各TFで異なる長さのシーケンスをパディングして統一
+    
+    Args:
+        batch: List[Dict[str, Dict[str, torch.Tensor]]] - [{'features': {...}, 'targets': {...}}]
+    
+    Returns:
+        Dict with 'features' and 'targets', each containing Dict[tf_name: torch.Tensor]
+    """
+    # 最初のサンプルから構造を確認
+    if not batch:
+        return {}
+        
+    sample = batch[0]
+    
+    # async_samplerモードかどうかを判定
+    if isinstance(sample.get('features'), dict):
+        # Model v2: Dict形式
+        result = {'features': {}, 'targets': {}}
+        
+        # featuresを処理
+        if 'features' in sample:
+            tf_features = defaultdict(list)
+            for item in batch:
+                for tf_name, tf_tensor in item['features'].items():
+                    tf_features[tf_name].append(tf_tensor)
+            
+            for tf_name, tensors in tf_features.items():
+                # pad_sequence を使って可変長シーケンスをパディング
+                result['features'][tf_name] = torch.nn.utils.rnn.pad_sequence(
+                    tensors, 
+                    batch_first=True, 
+                    padding_value=float('nan')
+                )
+        
+        # targetsを処理
+        if 'targets' in sample:
+            tf_targets = defaultdict(list)
+            for item in batch:
+                for tf_name, tf_tensor in item['targets'].items():
+                    tf_targets[tf_name].append(tf_tensor)
+            
+            for tf_name, tensors in tf_targets.items():
+                # pad_sequence を使って可変長シーケンスをパディング
+                result['targets'][tf_name] = torch.nn.utils.rnn.pad_sequence(
+                    tensors, 
+                    batch_first=True, 
+                    padding_value=float('nan')
+                )
+        
+        return result
+    else:
+        # Legacy: tensor形式（後方互換性）
+        features_list = []
+        targets_list = []
+        
+        for item in batch:
+            features_list.append(item['features'])
+            targets_list.append(item['targets'])
+        
+        return {
+            'features': torch.stack(features_list, dim=0),
+            'targets': torch.stack(targets_list, dim=0)
+        }
+
 
 class Stage1Dataset(Dataset):
     """Stage 1 データセット（最適化版）"""
@@ -67,6 +137,7 @@ class Stage1Dataset(Dataset):
         
         # ウィンドウサンプリング（ベクトル化+キャッシュ）
         cache_dir = self.data_dir / "cache"
+        async_sampler = config.get('model', {}).get('async_sampler', False)
         self.window_sampler = MultiTFWindowSampler(
             tf_data=self.tf_data,
             seq_len=config['data']['seq_len'],
@@ -74,7 +145,8 @@ class Stage1Dataset(Dataset):
             val_split=config['validation']['val_split'],
             min_coverage=0.8,
             cache_dir=str(cache_dir),
-            val_gap_days=config['validation'].get('val_gap_days', 1.0)
+            val_gap_days=config['validation'].get('val_gap_days', 1.0),
+            async_sampler=async_sampler
         )
         
         # 注意：マスキングはモデル内で実行（data_loader側では生データを返す）
@@ -122,28 +194,52 @@ class Stage1Dataset(Dataset):
         return len(self.window_sampler)
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """最適化されたバッチ取得"""
-        # ウィンドウデータ取得
+        """最適化されたバッチ取得（Model v2 Dict対応）"""
+        # ウィンドウデータ取得（Dict[tf_name, pd.DataFrame] 形式）
         window_data = self.window_sampler[idx]
         
-        # 特徴量エンジニアリング
-        features, targets = self.feature_engineer.process_window(window_data)
+        # 非同期モードかどうかで処理を分岐
+        async_sampler = self.config.get('model', {}).get('async_sampler', False)
         
-        # 正規化（features用）
-        features = self.normalizer.normalize(features)
-        
-        # ターゲット用の正規化（OHLC用）
-        targets = self.normalizer.normalize_targets(targets)
-        
-        # 既にテンソル形式（BF16互換）
-        features_tensor = features.to(torch.float32)
-        targets_tensor = targets.to(torch.float32)
-        
-        # 🔥 生データを返す（マスキングはモデル内で実行）
-        return {
-            'features': features_tensor,  # 生の特徴量（マスクなし）
-            'targets': targets_tensor
-        }
+        if async_sampler:
+            # Model v2: Dict形式で各TFを個別処理
+            tf_features = {}
+            tf_targets = {}
+            
+            for tf_name, tf_window_df in window_data.items():
+                # 各TFの特徴量エンジニアリング
+                tf_feat, tf_targ = self.feature_engineer.process_single_tf_window(tf_name, tf_window_df)
+                
+                # 正規化
+                tf_feat_norm = self.normalizer.normalize_single_tf(tf_feat, tf_name)
+                tf_targ_norm = self.normalizer.normalize_targets_single_tf(tf_targ, tf_name)
+                
+                # numpy -> torch tensor変換
+                tf_features[tf_name] = torch.tensor(tf_feat_norm, dtype=torch.float32)
+                tf_targets[tf_name] = torch.tensor(tf_targ_norm, dtype=torch.float32)
+            
+            return {
+                'features': tf_features,  # Dict[tf_name, torch.Tensor]
+                'targets': tf_targets     # Dict[tf_name, torch.Tensor]
+            }
+        else:
+            # Legacy: tensor形式（後方互換性）
+            features, targets = self.feature_engineer.process_window(window_data)
+            
+            # 正規化（features用）
+            features = self.normalizer.normalize(features)
+            
+            # ターゲット用の正規化（OHLC用）
+            targets = self.normalizer.normalize_targets(targets)
+            
+            # 既にテンソル形式（BF16互換）
+            features_tensor = features.to(torch.float32)
+            targets_tensor = targets.to(torch.float32)
+            
+            return {
+                'features': features_tensor,  # 生の特徴量（マスクなし）
+                'targets': targets_tensor
+            }
 
 def create_stage1_dataloaders(data_dir: str, config: dict) -> Tuple[DataLoader, DataLoader]:
     """最適化されたDataLoader作成"""
@@ -152,6 +248,9 @@ def create_stage1_dataloaders(data_dir: str, config: dict) -> Tuple[DataLoader, 
     dataloader_config = config.get('dataloader', {})
     batch_size = config['training']['batch_size']
     
+    # 非同期サンプラーモードの確認
+    async_sampler = config.get('model', {}).get('async_sampler', False)
+    
     # 最適化設定
     dataloader_kwargs = {
         'batch_size': batch_size,
@@ -159,8 +258,13 @@ def create_stage1_dataloaders(data_dir: str, config: dict) -> Tuple[DataLoader, 
         'pin_memory': dataloader_config.get('pin_memory', True),
         'persistent_workers': dataloader_config.get('persistent_workers', True),
         'prefetch_factor': dataloader_config.get('prefetch_factor', 4),
-        'drop_last': True,  # バッチサイズ統一
+        'drop_last': not async_sampler,  # async時はFalse（可変長対応）、sync時はTrue
     }
+    
+    # 非同期モードの場合、collate_fnを追加
+    if async_sampler:
+        dataloader_kwargs['collate_fn'] = collate_multiscale
+        print("🔄 非同期マルチスケールモード有効")
     
     # データセット作成
     train_dataset = Stage1Dataset(data_dir, config, split="train")
