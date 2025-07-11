@@ -83,11 +83,11 @@ evaluation:
 
 # ログ・チェックポイント（10エポック最適化）
 logging:
-  log_every_n_steps: 10
+  log_every_n_steps: 200          # 🔥 stdout削減: 200step毎のみログ
   checkpoint_every_n_epochs: 1    # 毎エポック評価
   save_top_k: 2                   # ベスト2のみ保存（ディスク節約）
   monitor: "val_correlation_mean"
-  progress_bar_refresh_rate: 50
+  progress_bar_refresh_rate: 200  # 🔥 stdout削減: 200step毎のみ更新
 
 # 実行設定
 runtime:

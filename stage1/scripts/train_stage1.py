@@ -77,7 +77,7 @@ except ImportError:
 class CustomProgressBar(TQDMProgressBar):
     """◆ カスタムプログレスバー：重要メトリクスのみ表示"""
     
-    def __init__(self, refresh_rate: int = 10):
+    def __init__(self, refresh_rate: int = 200):  # 🔥 200step毎に更新（stdout削減）
         super().__init__(refresh_rate=refresh_rate)
     
     def get_metrics(self, trainer, pl_module):
@@ -212,9 +212,10 @@ class Stage1LightningModule(pl.LightningModule):
         loss = losses['total']
         self.log("train_loss_step", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
-        # 学習率もログ（プログレスバーに表示）
-        current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
-        self.log("lr-AdamW", current_lr, on_step=True, prog_bar=True, logger=True)
+        # 🔥 学習率は200step毎のみログ（stdout削減）
+        if hasattr(self.trainer, 'global_step') and self.trainer.global_step % 200 == 0:
+            current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
+            self.log("lr-AdamW", current_lr, on_step=True, prog_bar=True, logger=True)
         
         # 詳細損失もログ（エポック単位のみ）
         for loss_name, loss_value in losses.items():
@@ -225,7 +226,10 @@ class Stage1LightningModule(pl.LightningModule):
         return loss
         
     def _debug_t5_gradients(self, t5_encoder, batch_idx):
-        """T5勾配フローのデバッグ"""
+        """T5勾配フローのデバッグ（200step毎のみ）"""
+        if batch_idx % 200 != 0:  # 🔥 200step毎のみ実行
+            return
+            
         try:
             # T5EncoderModelの正しい構造を使用
             sample_param = t5_encoder.encoder.block[0].layer[0].SelfAttention.q.weight
@@ -263,8 +267,10 @@ class Stage1LightningModule(pl.LightningModule):
         if not torch.isfinite(grad_norm):
             grad_norm = torch.tensor(1e3, device=self.device)
             
-        self.log("grad_norm", grad_norm,
-                 on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        # 🔥 grad_norm は200step毎のみログ（stdout削減）
+        if hasattr(self.trainer, 'global_step') and self.trainer.global_step % 200 == 0:
+            self.log("grad_norm", grad_norm,
+                     on_step=True, on_epoch=False, prog_bar=True, logger=True)
         
         # ---- 2) AMPオーバーフロー検知（GradScalerから正確に取得）----
         overflow = 0.0
@@ -276,8 +282,10 @@ class Stage1LightningModule(pl.LightningModule):
             if hasattr(scaler, '_scale') and scaler._scale is not None:
                 overflow = 1.0 if scaler._scale.item() == 0 else 0.0
                 
-        self.log("amp_overflow", overflow,
-                 on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        # 🔥 amp_overflow は200step毎のみログ（stdout削減）
+        if hasattr(self.trainer, 'global_step') and self.trainer.global_step % 200 == 0:
+            self.log("amp_overflow", overflow,
+                     on_step=True, on_epoch=False, prog_bar=True, logger=True)
         
         # ---- 3) 勾配クリッピング（オーバーフロー対策もLightningに任せる）----
         # クリッピング前後の値を記録
@@ -881,8 +889,8 @@ def main():
     lr_monitor = LearningRateMonitor(logging_interval='step')
     callbacks.append(lr_monitor)
     
-    # ◆ カスタムプログレスバー（10ステップごとに更新）
-    custom_progress = CustomProgressBar(refresh_rate=10)
+    # ◆ カスタムプログレスバー（200ステップごとに更新・stdout削減）
+    custom_progress = CustomProgressBar(refresh_rate=200)  # 🔥 stdout削減
     callbacks.append(custom_progress)
     
     # 🔥 T5転移学習用コールバックは廃止（T5は常に解凍状態）
