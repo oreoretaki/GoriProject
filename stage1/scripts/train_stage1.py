@@ -8,7 +8,7 @@ import os
 # PyTorch分散学習を完全無効化（importより前に設定）
 os.environ['PYTORCH_LIGHTNING_DISABLE_MPI'] = '1'
 os.environ['PL_DISABLE_FORK'] = '1' 
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # 🔥 無効化: GPU kernel逐次同期で10倍遅くなる
 os.environ['PL_TORCH_DISTRIBUTED_BACKEND'] = 'gloo'
 os.environ['MASTER_ADDR'] = 'localhost'
 os.environ['MASTER_PORT'] = '29500'
@@ -47,19 +47,12 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
-# WSL/MPI互換性のための環境変数設定（importの直後に実行）
-os.environ['PL_DISABLE_FORK'] = '1'
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-os.environ['PL_TORCH_DISTRIBUTED_BACKEND'] = 'gloo'
-# MPI検出を完全無効化
-os.environ['PYTORCH_LIGHTNING_DISABLE_MPI'] = '1'
-os.environ['SLURM_DISABLED'] = '1'
+# 重複した環境変数設定を削除（既に上部で設定済み）
 
-# プロジェクトルートをPATHに追加
+# プロジェクトルートをPATHに追加（重複を削除）
 current_dir = Path(__file__).parent
-project_root = current_dir.parent.parent
-sys.path.insert(0, str(project_root))
-sys.path.insert(0, str(current_dir.parent))
+stage1_dir = current_dir.parent  # stage1ディレクトリ
+sys.path.insert(0, str(stage1_dir))  # stage1ディレクトリを優先
 
 from src.data_loader import create_stage1_dataloaders
 from src.model import Stage1Model, create_stage1_model
@@ -750,7 +743,7 @@ def deep_merge(base: dict, override: dict) -> dict:
 def main():
     # PyTorch分散学習を完全無効化してWSL互換性を向上
     os.environ['PL_DISABLE_FORK'] = '1'
-    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'  # 🔥 無効化: GPU kernel逐次同期で10倍遅くなる
     os.environ['PL_TORCH_DISTRIBUTED_BACKEND'] = 'gloo'
     os.environ['WORLD_SIZE'] = '1'
     os.environ['RANK'] = '0'
