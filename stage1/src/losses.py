@@ -419,8 +419,12 @@ class Stage1CombinedLoss(nn.Module):
                 continue
                 
             # 有効な位置のみで損失計算
-            pred_valid = pred_tf[valid_mask]  # [valid_positions, 4]
-            target_valid = target_tf[valid_mask]  # [valid_positions, 4]
+            if valid_mask.dim() == 2:  # [batch, seq_len]
+                pred_valid = pred_tf[valid_mask]  # [valid_positions, 4]
+                target_valid = target_tf[valid_mask]  # [valid_positions, 4]
+            else:  # フォールバック: 全体を使用
+                pred_valid = pred_tf.view(-1, pred_tf.size(-1))
+                target_valid = target_tf.view(-1, target_tf.size(-1))
             
             loss = F.huber_loss(pred_valid, target_valid, delta=self.huber_loss.delta, reduction='mean')
             total_loss += loss
