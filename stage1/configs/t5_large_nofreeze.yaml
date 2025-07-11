@@ -50,7 +50,7 @@ model:
 
 # 訓練設定（T5-Large安定化）
 training:
-  batch_size: 1024                # H100最適化: 256→1024（4倍）
+  batch_size: 512                 # H100最適化: 1024→512（OOM対策）
   epochs: 7                       # 7エポック設定
   accumulate_grad_batches: 1      # 実効バッチサイズ1024
   warmup_epochs: 1              # 5倍データ用に短縮（全体の約5%）
