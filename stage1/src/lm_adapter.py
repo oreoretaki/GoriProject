@@ -252,11 +252,18 @@ class T5TimeSeriesAdapter(nn.Module):
         # 🔥 T5エンコーダーは最初から解凍状態（凍結機能廃止）
         print(f"🔓 T5エンコーダーは最初から解凍状態で開始")
         
+        # 🔥 T5パラメータ数をデバッグ出力
+        t5_params = sum(p.numel() for p in self.t5_encoder.parameters())
+        adapter_params = sum(p.numel() for p in self.parameters()) - t5_params
+        
         print(f"✅ T5TimeSeriesAdapter初期化完了")
         print(f"   T5 d_model: {self.d_model}")
         print(f"   Stage-1 d_model: {stage1_d_model}")
         print(f"   Patch length: {self.patch_len}")
         print(f"   凍結機能: 廃止（常に解凍状態）")
+        print(f"   🔍 T5パラメータ数: {t5_params:,} ({t5_params/1e6:.1f}M)")
+        print(f"   🔍 Adapterパラメータ数: {adapter_params:,} ({adapter_params/1e6:.1f}M)")
+        print(f"   🔍 総パラメータ数: {t5_params + adapter_params:,} ({(t5_params + adapter_params)/1e6:.1f}M)")
     
     # 🔥 凍結機能は廃止 - T5エンコーダーは常に解凍状態
     
