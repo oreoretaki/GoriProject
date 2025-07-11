@@ -394,8 +394,20 @@ class Stage1CombinedLoss(nn.Module):
             mask_tf = masks.get(tf_name, None) if masks is not None else None
             
             # NaN値を除外（padding対応）
-            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            batch_size_tf, seq_len_tf = pred_tf.shape[:2]
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len_tf]
+            
             if mask_tf is not None:
+                # mask_tfがvalid_maskと同じshapeでない場合は調整
+                if mask_tf.shape != valid_mask.shape:
+                    # mask_tfをtarget_tfの実際の形状に合わせる
+                    if mask_tf.shape[1] > seq_len_tf:
+                        mask_tf = mask_tf[:, :seq_len_tf]  # truncate
+                    elif mask_tf.shape[1] < seq_len_tf:
+                        # padding with False (not masked)
+                        pad_width = seq_len_tf - mask_tf.shape[1]
+                        mask_tf = torch.cat([mask_tf, torch.zeros(batch_size_tf, pad_width, dtype=torch.bool, device=mask_tf.device)], dim=1)
+                
                 valid_mask = valid_mask & ~mask_tf  # マスクされた位置も除外
             
             if valid_mask.sum() == 0:
@@ -426,8 +438,20 @@ class Stage1CombinedLoss(nn.Module):
             batch_size, seq_len, n_features = pred_tf.shape
             
             # NaN値を除外（padding対応）
-            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            batch_size_tf, seq_len_tf = pred_tf.shape[:2]
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len_tf]
+            
             if mask_tf is not None:
+                # mask_tfがvalid_maskと同じshapeでない場合は調整
+                if mask_tf.shape != valid_mask.shape:
+                    # mask_tfをtarget_tfの実際の形状に合わせる
+                    if mask_tf.shape[1] > seq_len_tf:
+                        mask_tf = mask_tf[:, :seq_len_tf]  # truncate
+                    elif mask_tf.shape[1] < seq_len_tf:
+                        # padding with False (not masked)
+                        pad_width = seq_len_tf - mask_tf.shape[1]
+                        mask_tf = torch.cat([mask_tf, torch.zeros(batch_size_tf, pad_width, dtype=torch.bool, device=mask_tf.device)], dim=1)
+                
                 valid_mask = valid_mask & ~mask_tf  # マスクされた位置も除外
             
             for feat_idx in range(n_features):
@@ -496,7 +520,8 @@ class Stage1CombinedLoss(nn.Module):
             batch_size, seq_len, n_features = pred_tf.shape
             
             # NaN値を除外（padding対応）
-            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            batch_size_tf, seq_len_tf = pred_tf.shape[:2]
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len_tf]
             
             for feat_idx in range(n_features):
                 pred_signal = pred_tf[:, :, feat_idx]  # [batch, seq_len]
@@ -559,7 +584,19 @@ class Stage1CombinedLoss(nn.Module):
             expected_tf = self._aggregate_m1_to_tf_dict(m1_ref, interval, pred_tf.shape[1])
             
             # NaN値を除外
-            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            batch_size_tf, seq_len_tf = pred_tf.shape[:2]
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len_tf]
+            
+            # expected_tfの形状をpred_tfに合わせる
+            if expected_tf.shape[1] != seq_len_tf:
+                if expected_tf.shape[1] > seq_len_tf:
+                    expected_tf = expected_tf[:, :seq_len_tf]  # truncate
+                elif expected_tf.shape[1] < seq_len_tf:
+                    # padding with NaN
+                    pad_width = seq_len_tf - expected_tf.shape[1]
+                    pad_tensor = torch.full((batch_size_tf, pad_width, 4), float('nan'), device=expected_tf.device, dtype=expected_tf.dtype)
+                    expected_tf = torch.cat([expected_tf, pad_tensor], dim=1)
+            
             if valid_mask.sum() == 0:
                 continue
                 
