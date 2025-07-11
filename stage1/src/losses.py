@@ -419,15 +419,15 @@ class Stage1CombinedLoss(nn.Module):
                 continue
                 
             # 有効な位置のみで損失計算
-            # 🔥 形状安全性チェック: マスクとターゲットの形状が一致するか確認
-            if valid_mask.shape[:2] == target_tf.shape[:2]:
-                pred_valid = pred_tf[valid_mask]  # [valid_positions, 4]
-                target_valid = target_tf[valid_mask]  # [valid_positions, 4]
-            else:
-                # 形状不整合時: 全体を使用（NaN部分は除外）
-                nan_mask = ~torch.isnan(target_tf).any(dim=-1)  # [batch, seq_len]
-                pred_valid = pred_tf[nan_mask]
-                target_valid = target_tf[nan_mask]
+            # 🔥 async_samplerモード: NaN-basedマスキングのみ使用（形状不整合回避）
+            nan_mask = ~torch.isnan(target_tf).any(dim=-1)  # [batch, seq_len_tf]
+            
+            # 有効な位置が存在するかチェック
+            if nan_mask.sum() == 0:
+                continue
+                
+            pred_valid = pred_tf[nan_mask]  # [valid_positions, 4]
+            target_valid = target_tf[nan_mask]  # [valid_positions, 4]
             
             loss = F.huber_loss(pred_valid, target_valid, delta=self.huber_loss.delta, reduction='mean')
             total_loss += loss
