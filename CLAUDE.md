@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Overview
+
+GoriProject is a sophisticated USD/JPY machine learning system that implements a multi-stage architecture for financial time-series analysis and trading. The project uses self-supervised learning with advanced multi-timeframe reconstruction techniques.
+
+**Tech Stack**: PyTorch, PyTorch Lightning, Transformers (T5), Pandas, Docker, CUDA 11.8/12.8
+
 ## Project Architecture
 
 This is a USD/JPY machine learning project with a stage-based architecture:
@@ -9,6 +15,10 @@ This is a USD/JPY machine learning project with a stage-based architecture:
 - **data/**: Shared data directory containing source SQLite DB and derived high-quality Parquet files
 - **stage0/**: Data preprocessing foundation (✅ COMPLETED) - transforms raw OANDA data into ML-ready format
 - **stage1/**: Self-supervised multi-TF reconstruction (✅ COMPLETED) - trains encoder-decoder for masked span reconstruction
+- **doc/**: Comprehensive project documentation (6 files covering architecture, API, developer guide)
+- **tests/**: Unit tests for data pipeline and components
+- **scripts/**: Deployment and Git automation scripts
+- **old/**: Deprecated files and experiments (ignore unless researching history)
 
 ### Stage 0 - Data Preprocessing Foundation (COMPLETED)
 
@@ -29,57 +39,147 @@ Stage 0 is the critical data preprocessing pipeline that transforms raw OANDA US
 
 ## Common Commands
 
-### Stage 0 Validation
+### 🚀 Quick Start
 ```bash
+# Clone repository
+git clone https://github.com/oreoretaki/GoriProject.git
+cd GoriProject
+
+# Verify Stage 0 data quality (should complete in ~0.8s)
 cd stage0
 python3 scripts/run_validate.py
-# Expected: 0.7s execution, 100% consistency across all timeframes
+
+# Run Stage 1 fast test
+cd ../stage1
+python3 scripts/train_stage1.py --config configs/test.yaml --data_dir ../data/derived --fast_dev_run --devices 1
 ```
 
-### Running Tests
+### Stage 0 Commands
 ```bash
 cd stage0
+
+# Data validation (0.7-0.8s execution, 100% consistency expected)
+python3 scripts/run_validate.py
+
+# Data integrity check
+python3 scripts/verify_hash_manifest.py
+
+# Regenerate all timeframe data from source (if needed)
+python3 scripts/make_tf_data.py
+
+# Run tests
 pytest                           # Run all tests
 pytest tests/test_boundary.py    # Run boundary condition tests
 python3 tests/test_boundary.py   # Direct execution
 ```
 
-### Data Integrity Verification
-```bash
-cd stage0
-python3 scripts/verify_hash_manifest.py  # Verify data file integrity
-```
-
-### Stage 1 Execution
+### Stage 1 Training Commands
 ```bash
 cd stage1
 
-# Fast test execution (recommended first step)
+# Fast test execution (recommended first step) - lightweight config
 python3 scripts/train_stage1.py \
   --config configs/test.yaml \
   --data_dir ../data/derived \
   --fast_dev_run \
   --devices 1
 
-# Development data creation (for large datasets)
-python3 scripts/create_dev_data.py
+# Short training run (3 epochs)
 python3 scripts/train_stage1.py \
-  --config configs/dev.yaml \
-  --data_dir ../data/dev \
-  --fast_dev_run \
+  --config configs/test.yaml \
+  --data_dir ../data/derived \
+  --max_epochs 3 \
   --devices 1
 
-# Full training
+# Full training with base config
 python3 scripts/train_stage1.py \
   --config configs/base.yaml \
   --data_dir ../data/derived \
   --devices 1
+
+# T5 transfer learning (recommended for production)
+python3 scripts/train_stage1.py \
+  --config configs/t5_large_nofreeze.yaml \
+  --data_dir ../data/derived \
+  --devices 1 \
+  --precision bf16-true \
+  --max_epochs 5 \
+  --mask_token_lr_scale 0.1
+
+# Multiple seed evaluation
+python3 scripts/train_stage1.py \
+  --config configs/shared_base.yaml \
+  --seeds 42 123 2025
 ```
 
-### ETL Pipeline Execution
+### Evaluation Commands
 ```bash
-cd stage0
-python3 scripts/make_tf_data.py  # Regenerate all timeframe data from source
+cd stage1
+
+# Evaluate trained model
+python3 scripts/evaluate_stage1.py \
+  --config configs/base.yaml \
+  --ckpt checkpoints/stage1-epoch-XX.ckpt \
+  --data_dir ../data/derived \
+  --output evaluation_results.json
+
+# Evaluate with different mask ratios
+python3 scripts/evaluate_stage1.py \
+  --config configs/base.yaml \
+  --ckpt checkpoints/best.ckpt \
+  --eval_mask_ratio 0.0  # No masking
+```
+
+### Testing Commands
+```bash
+# Test data pipeline
+cd tests
+python3 test_stage1_data.py
+
+# Unit tests for losses
+python3 unit/test_losses.py
+
+# Stage 0 tests
+cd ../stage0/tests
+python3 test_boundary.py
+python3 test_tf_generation.py
+```
+
+### Monitoring Commands
+```bash
+# Start TensorBoard
+tensorboard --logdir stage1/logs/
+
+# Monitor GPU usage during training
+cd stage1
+python3 scripts/monitor_gpu.py
+
+# Analyze training logs
+python3 analyze_logs.py
+
+# Profile model bottlenecks
+python3 scripts/profile_bottleneck.py
+```
+
+### Deployment & Docker Commands
+```bash
+# Build Docker image
+docker build -t goriproject:latest .
+
+# Run with Docker Compose
+docker-compose up -d
+
+# Deploy to vast.ai (includes setup instructions)
+./scripts/deploy_vastai.sh
+
+# Use pre-built Docker image
+docker run -it --gpus all oreoretaki/goriproject:latest
+
+# Quick Git sync
+GITHUB_TOKEN=your_token ./scripts/quick_update.sh "Update message"
+
+# Full Git sync with pull
+./scripts/git_sync.sh
 ```
 
 ## Stage 0 Data Architecture
@@ -110,13 +210,29 @@ python3 scripts/make_tf_data.py  # Regenerate all timeframe data from source
 
 ## Development Requirements
 
-**Dependencies**:
+### System Requirements
+- **Python**: 3.10+ (3.11 recommended)
+- **CUDA**: 11.8 or 12.8 (for GPU training)
+- **Memory**: 16GB+ RAM recommended
+- **GPU**: RTX 3090/4090, A100, or H100 (24GB+ VRAM for T5-large)
+- **Storage**: 50GB+ for data and checkpoints
+
+### Dependencies Installation
 ```bash
-pip install pandas>=2.0.0 pyarrow>=12.0.0 matplotlib>=3.7.0 psutil>=5.9.0
+# Install from root requirements.txt (includes CUDA 11.8 PyTorch)
+pip install -r requirements.txt
+
+# Or install Stage 1 specific requirements
+cd stage1
+pip install -r requirements.txt
 ```
 
-**Python**: 3.11+
-**Memory**: 8GB+ recommended for full dataset processing
+### Key Dependencies
+- PyTorch 2.4.1 (CUDA 11.8/12.8)
+- PyTorch Lightning 2.4.0
+- Transformers 4.53.1 (for T5 models)
+- Pandas 2.3.0 + PyArrow for Parquet
+- TensorBoard for monitoring
 
 ## Critical Rules for Stage 1 Development
 
@@ -149,39 +265,30 @@ Stage 1 implements a sophisticated self-supervised learning system that trains a
 - **Masking Strategy**: Random contiguous blocks (5-60 bars), 15% mask ratio, TF-synchronized
 - **Model**: TF-specific CNNs + Shared Encoder + Bottleneck + TF-specific Decoders
 - **4-Component Loss**: Huber + Multi-resolution STFT + Cross-TF consistency + Amplitude-phase correlation
+- **T5 Transfer Learning**: Optional pre-trained T5 encoder initialization with layerwise LR decay
+
+**Recent Updates** (引き継ぎメモより):
+1. **TF別WindowSampler**: SingleTFWindowSampler実装、空TF除外、TF固有gap/キャッシュ対応
+2. **Learnable Mask Token**: nn.Parameter化、in-place置換実装
+3. **マスクdtype統一**: 全てtorch.bool
+4. **評価指標リーク対策**: マスク位置のみでcorr計算
+5. **Optimizer拡張**: mask_token独立学習率 (mask_token_lr_scale)
+6. **Docker/vast.ai対応**: oreoretaki/goriproject:latest、H100対応済み
 
 **Key Files**:
 - `stage1/src/data_loader.py`: Main data pipeline orchestration
 - `stage1/src/model.py`: Neural network architecture (TF-CNN + Transformer encoder + decoders)
 - `stage1/src/losses.py`: Multi-component loss functions
+- `stage1/src/lm_adapter.py`: T5 transfer learning adapter
 - `stage1/scripts/train_stage1.py`: PyTorch Lightning training with One-Cycle LR
 - `stage1/scripts/evaluate_stage1.py`: Comprehensive evaluation with correlation/consistency metrics
 
-## Stage 1 Commands
-
-### Training
-```bash
-cd stage1
-python3 scripts/train_stage1.py \
-  --config configs/base.yaml \
-  --data_dir ../data/derived \
-  --gpus 1
-```
-
-### Evaluation
-```bash
-python3 scripts/evaluate_stage1.py \
-  --config configs/base.yaml \
-  --ckpt checkpoints/stage1-epoch-XX.ckpt \
-  --data_dir ../data/derived \
-  --output evaluation_results.json
-```
-
-### Data Pipeline Testing
-```bash
-cd tests
-python3 test_stage1_data.py
-```
+**Configuration Files**:
+- `configs/shared_base.yaml`: Unified base configuration (seq_len=128, standardized loss weights)
+- `configs/test.yaml`: Lightweight test config (505K params, 5 epochs) - recommended for initial tests
+- `configs/base.yaml`: Full production training (3.5M params, 40 epochs)
+- `configs/t5_freeze.yaml`: T5 with progressive unfreezing (recommended for transfer learning)
+- `configs/t5_large_nofreeze.yaml`: T5-large experiments (requires 24GB+ VRAM, H100推奨)
 
 ## Critical Rules for Stage 2 Development
 
@@ -237,24 +344,84 @@ python3 scripts/train_stage1.py --config configs/shared_base.yaml --val_gap_days
 python3 scripts/train_stage1.py --config configs/shared_base.yaml --seeds 42 123 2025
 ```
 
-## 🔧 WSL Environment Compatibility
+## 🔧 Environment Compatibility & Troubleshooting
 
-### Resolved Issues
-- **MPI Detection Error**: Resolved with `PL_DISABLE_FORK=1` environment variable in `train_stage1.py`
-- **TensorBoard Dependency**: Installation method clarified (`pip install tensorboard`)
-- **Large Data Processing**: Handled with progressive lightweight configurations
+### WSL Environment Setup
+The project is optimized for WSL (Windows Subsystem for Linux) environments:
+- **MPI Detection**: Automatically handled with `PL_DISABLE_FORK=1` environment variable
+- **TensorBoard**: Install with `pip install tensorboard`
+- **GPU Access**: Ensure WSL2 with CUDA support is properly configured
 
-### Recommended Execution Order
-1. **Fast Test**: Use `configs/test.yaml` for initial verification
-2. **Development Data**: Create small dataset with `create_dev_data.py`
-3. **Progressive Scaling**: Gradually increase data size after success
+### vast.ai Deployment (H100推奨)
+```bash
+# H100 NVL (CUDA 12.8) インスタンスで動作確認済み
+docker run -it --gpus all oreoretaki/goriproject:latest
 
-### Configuration Files
-- `base.yaml`: Full production training (3.5M parameters, 40 epochs)
-- `test.yaml`: Lightweight test (505K parameters, 5 epochs) - **recommended first step**
-- `dev.yaml`: Ultra-lightweight development (large data handling)
+# 本番5エポック学習
+python scripts/train_stage1.py \
+    --config configs/t5_large_nofreeze.yaml \
+    --data_dir ../data/derived \
+    --devices 1 \
+    --precision bf16-true \
+    --max_epochs 5 \
+    --mask_token_lr_scale 0.1
+```
+
+### Common Issues & Solutions
+
+#### Triton AUTOTUNE Logs
+- **Issue**: 大量のTriton AUTOTUNEログ出力
+- **Solution**: 正常動作（カーネルベンチマーク）。初回のみ時間がかかる
+
+#### GPU Memory Issues
+```bash
+# For T5-large models, use gradient accumulation
+python3 scripts/train_stage1.py --config configs/t5_large_nofreeze.yaml --accumulate_grad_batches 16
+```
+
+#### Data Loading Errors
+```bash
+# Reduce workers if encountering bus errors
+python3 scripts/train_stage1.py --config configs/base.yaml --num_workers 0
+```
+
+#### NVML Error / nvidia-smi Instability
+- **Solution**: vast.aiホストのdriver更新直後に発生。再起動またはホスト移行で解消
+
+### Performance Optimization
+- **TF32 Mode**: Automatically enabled for RTX 30xx/40xx/A100/H100 GPUs
+- **Mixed Precision**: Use `precision="bf16-true"` for H100 (最速・安定)
+- **Batch Size**: Adjust based on GPU memory (default: 32)
+
+### Recommended Training Progression
+1. **Initial Test**: `configs/test.yaml` with `--fast_dev_run` (1 batch確認)
+2. **Short Training**: `configs/test.yaml` with `--max_epochs 3`
+3. **Production**: `configs/t5_large_nofreeze.yaml` with 5 epochs (val corr ≈ 0.20±0.03目標)
+4. **Hyperparameter Tuning**: mask_token_lr_scale感度確認 (0.05, 0.1, 0.2)
 
 ### Project Organization
-- `old/`: Contains deprecated files and unused virtual environments
-- `doc/`: Comprehensive project documentation (6 files, 1,798 lines)
-- `tests/`: Unit tests for data pipeline and loss functions
+- `old/`: Deprecated files and experiments (ignore unless debugging)
+- `doc/`: Comprehensive documentation (Stage1_仕様書.md, ARCHITECTURE.md, etc.)
+- `tests/`: Unit tests for all components
+- `checkpoints/`: Saved model weights
+- `logs/`: TensorBoard logs (view with `tensorboard --logdir logs/`)
+- `cache/`: Cached window indices for faster data loading
+
+## CI/CD Integration
+The project includes GitHub Actions for automated data integrity checks:
+- **Workflow**: `.github/workflows/data_hash.yml` (in stage0/)
+- **Triggers**: Push/PR to main branch affecting data files
+- **Checks**: Hash verification, data validation, boundary tests
+- **Artifacts**: Integrity reports saved for 30 days
+
+## 📌 Project Summary
+
+GoriProject is a production-ready financial ML system with:
+- **Data Quality**: 100% timeframe consistency with automated validation
+- **Advanced Architecture**: Multi-timeframe self-supervised learning with cross-scale consistency
+- **Transfer Learning**: T5 model integration with learnable mask tokens
+- **Scalability**: Docker containerization and vast.ai/H100 deployment support
+- **Monitoring**: Comprehensive logging, TensorBoard integration, and CI/CD pipelines
+- **Documentation**: Extensive technical documentation in both English and Japanese
+
+The project serves as a foundation for USD/JPY trading strategies, with Stage 0 and Stage 1 fully completed and ready for Stage 2 (RL Trading Agent) development.

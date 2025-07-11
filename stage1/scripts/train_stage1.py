@@ -677,7 +677,7 @@ def main():
     model = Stage1LightningModule(config)
     
     # PyTorch 2.0 コンパイル最適化（事前ウォームアップ付き）
-    if torch.__version__ >= '2.0.0':
+    if False:  # torch.__version__ >= '2.0.0':
         print("🚀 PyTorch 2.0 コンパイル最適化を適用中...")
         try:
             # GPUに移動
