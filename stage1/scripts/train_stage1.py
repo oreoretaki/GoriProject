@@ -864,8 +864,8 @@ def main():
     # コールバック設定
     callbacks = []
     
-    # 🔥 メモリ管理コールバック（DataFrameリーク対策）
-    memory_callback = MemoryManagementCallback(gc_every_n_steps=20)
+    # 🔥 メモリ管理コールバック（DataFrameリーク対策 - 頻度最適化）
+    memory_callback = MemoryManagementCallback(gc_every_n_steps=200)  # 🔥 20→200に変更
     callbacks.append(memory_callback)
     
     # チェックポイント保存

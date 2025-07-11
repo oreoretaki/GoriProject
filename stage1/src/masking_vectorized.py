@@ -150,18 +150,32 @@ class VectorizedMaskingStrategy(nn.Module):
         # 🔥 終了位置を計算
         end_positions = (start_positions + span_lengths).clamp(max=seq_len)
         
-        # 🔥 マスクを一括適用
+        # 🔥 完全ベクトル化マスク適用 - Pythonループ除去
         masks = torch.zeros(batch_size, seq_len, device=device, dtype=torch.bool)
         
-        for b in range(batch_size):
-            for s in range(estimated_spans):
-                start = start_positions[b, s].item()
-                end = end_positions[b, s].item()
-                masks[b, start:end] = True
+        # バッチ全体でスパンを一括適用
+        batch_indices = torch.arange(batch_size, device=device)[:, None]  # [batch, 1]
+        span_indices = torch.arange(estimated_spans, device=device)[None, :]  # [1, spans]
+        
+        # 各スパンに対してマスクを適用
+        for s in range(estimated_spans):
+            # 開始・終了位置を取得
+            starts = start_positions[:, s]  # [batch]
+            ends = end_positions[:, s]      # [batch]
+            
+            # 各バッチの各スパンに対して範囲インデックスを生成
+            max_span_len = (ends - starts).max().item()
+            if max_span_len > 0:
+                # 範囲インデックスを生成: [batch, max_span_len]
+                range_indices = torch.arange(max_span_len, device=device)[None, :] + starts[:, None]
                 
-                # 目標マスク数に達したらbreak
-                if masks[b].sum() >= target_masked:
-                    break
+                # 有効範囲のマスクを作成
+                valid_mask = (torch.arange(max_span_len, device=device)[None, :] < (ends - starts)[:, None])
+                valid_mask = valid_mask & (range_indices < seq_len)
+                
+                # マスクを適用
+                batch_idx = batch_indices[:, 0][:, None].expand(-1, max_span_len)
+                masks[batch_idx[valid_mask], range_indices[valid_mask]] = True
         
         # 🔥 マスク数を正確に調整（バッチ並列）
         masks = self._adjust_mask_count_vectorized(masks, target_masked)

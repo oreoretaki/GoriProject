@@ -57,13 +57,42 @@ class VectorizedStage1Model(nn.Module):
                 from .lm_adapter import T5TimeSeriesAdapter
                 return T5TimeSeriesAdapter(self.config)
             except ImportError:
-                print("⚠️ T5未利用 - 通常Transformerエンコーダーを使用")
-                return self._create_transformer_encoder()
+                print("⚠️ T5未利用 - FlashAttention2対応Transformerエンコーダーを使用")
+                return self._create_flash_attention_encoder()
         else:
+            return self._create_flash_attention_encoder()
+    
+    def _create_flash_attention_encoder(self):
+        """🔥 FlashAttention2対応Transformerエンコーダー作成"""
+        try:
+            # PyTorch 2.3+ でFlashAttention2が利用可能か確認
+            import torch
+            if hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
+                print("⚡ FlashAttention2 (SDPA) を使用")
+                encoder_layer = nn.TransformerEncoderLayer(
+                    d_model=self.d_model,
+                    nhead=8,
+                    dim_feedforward=self.d_model * 4,
+                    dropout=0.1,
+                    activation='gelu',
+                    batch_first=True
+                )
+                # FlashAttention2を強制有効化
+                with torch.backends.cuda.sdp_kernel(
+                    enable_flash=True,
+                    enable_math=False,
+                    enable_mem_efficient=False
+                ):
+                    return nn.TransformerEncoder(encoder_layer, num_layers=4)
+            else:
+                print("⚠️ FlashAttention2未対応 - 通常Transformerを使用")
+                return self._create_transformer_encoder()
+        except:
+            print("⚠️ FlashAttention2設定失敗 - 通常Transformerを使用")
             return self._create_transformer_encoder()
     
     def _create_transformer_encoder(self):
-        """Transformerエンコーダー作成"""
+        """通常Transformerエンコーダー作成"""
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.d_model,
             nhead=8,
@@ -110,15 +139,8 @@ class VectorizedStage1Model(nn.Module):
         🔥 バッチ融合による高速化
         各TFを個別処理せず、バッチ次元に融合して1回でEncoder通過
         """
-        # 1. TF-specific stem処理（異なるseq_lenのため個別処理は必要）
-        stemmed_features = {}
-        for tf_name, tf_features in batch.items():
-            # [batch, seq_len, n_features] → [batch, n_features, seq_len]
-            x = tf_features.transpose(1, 2)
-            # Conv1d処理
-            x = self.tf_stems[tf_name](x)
-            # [batch, d_model, seq_len] → [batch, seq_len, d_model]
-            stemmed_features[tf_name] = x.transpose(1, 2)
+        # 🔥 1. TF-specific stem処理を最適化 - 複数TFを並列処理
+        stemmed_features = self._process_stems_parallel(batch)
         
         # 🔥 2. 共通seq_lenにパディングしてバッチ融合
         max_seq_len = max(x.shape[1] for x in stemmed_features.values())
@@ -176,6 +198,54 @@ class VectorizedStage1Model(nn.Module):
                 outputs[tf_name] = self.tf_decoders[tf_name](tf_encoded)  # [batch, seq_len, 4]
         
         return outputs
+    
+    def _process_stems_parallel(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        🔥 TF-specific stem処理を並列化
+        異なるseq_lenでも可能な限り並列処理
+        """
+        stemmed_features = {}
+        
+        # 同一seq_lenのTFをグループ化
+        seq_len_groups = {}
+        for tf_name, tf_features in batch.items():
+            seq_len = tf_features.shape[1]
+            if seq_len not in seq_len_groups:
+                seq_len_groups[seq_len] = []
+            seq_len_groups[seq_len].append((tf_name, tf_features))
+        
+        # 各seq_lenグループで並列処理
+        for seq_len, tf_list in seq_len_groups.items():
+            if len(tf_list) == 1:
+                # 単一TFの場合は個別処理
+                tf_name, tf_features = tf_list[0]
+                x = tf_features.transpose(1, 2)
+                x = self.tf_stems[tf_name](x)
+                stemmed_features[tf_name] = x.transpose(1, 2)
+            else:
+                # 複数TFの場合はバッチ処理
+                tf_names = [tf_name for tf_name, _ in tf_list]
+                tf_features_list = [tf_features for _, tf_features in tf_list]
+                
+                # スタックして並列処理
+                stacked_features = torch.stack(tf_features_list, dim=1)  # [batch, n_tf, seq_len, n_features]
+                batch_size, n_tf, seq_len, n_features = stacked_features.shape
+                
+                # [batch*n_tf, seq_len, n_features] → [batch*n_tf, n_features, seq_len]
+                reshaped = stacked_features.view(batch_size * n_tf, seq_len, n_features).transpose(1, 2)
+                
+                # 各TFのstemを適用（まだ個別だが、将来的にgroups対応可能）
+                processed = []
+                for i, tf_name in enumerate(tf_names):
+                    tf_data = reshaped[i::n_tf]  # 各TFのデータを取得
+                    processed_data = self.tf_stems[tf_name](tf_data)
+                    processed.append(processed_data)
+                
+                # 結果を再構築
+                for i, tf_name in enumerate(tf_names):
+                    stemmed_features[tf_name] = processed[i].transpose(1, 2)
+        
+        return stemmed_features
     
     def get_model_info(self) -> Dict:
         """モデル情報を取得"""

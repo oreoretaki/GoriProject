@@ -52,13 +52,13 @@ model:
 training:
   batch_size: 768                 # 🔥 H100最適化: 中間バッチサイズ（500-1000の範囲）
   epochs: 7                       # 7エポック設定
-  accumulate_grad_batches: 1      # 実効バッチサイズ1024
+  accumulate_grad_batches: 1      # 🔥 GPU利用率最適化：1に固定
   warmup_epochs: 1              # 5倍データ用に短縮（全体の約5%）
   early_stop:
     patience: 3                   # 3エポック改善なしで早期終了
     min_delta: 0.001
     
-  precision: "bf16"           # H100最適化：BF16でTensor Core活用
+  precision: "bf16-mixed"     # 🔥 H100最適化：BF16 Mixed Precisionで高速化
 
 # データ拡張（無効化）
 augmentation:
