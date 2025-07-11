@@ -170,7 +170,8 @@ class Stage1LightningModule(pl.LightningModule):
             outputs = self.model(features, eval_mask_ratio=eval_mask_ratio)
             
             # M1データを抽出（クロス損失用）
-            m1_data = targets.get('m1') if isinstance(targets, dict) else None
+            # 🔥 CRITICAL FIX: targets→featuresから正しくm1データを取得
+            m1_data = features.get('m1') if isinstance(features, dict) else None
             
             # 損失計算（Dict版）
             losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
@@ -288,7 +289,8 @@ class Stage1LightningModule(pl.LightningModule):
             outputs = self.model(features, eval_mask_ratio=eval_mask_ratio)
             
             # M1データを抽出（クロス損失用）
-            m1_data = targets.get('m1') if isinstance(targets, dict) else None
+            # 🔥 CRITICAL FIX: targets→featuresから正しくm1データを取得
+            m1_data = features.get('m1') if isinstance(features, dict) else None
             
             # 損失計算（Dict版）
             losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
@@ -338,7 +340,8 @@ class Stage1LightningModule(pl.LightningModule):
             timeframes = self.config['data']['timeframes']
             for tf_idx, tf_name in enumerate(timeframes):
                 if tf_name in correlations:
-                    self.log(f'val_corr_{tf_name}', correlations[tf_name], on_epoch=True, prog_bar=False, logger=True)
+                    # 🔥 per-TFメトリクス常時可視化（プログレスバー表示）
+                    self.log(f'val_corr_{tf_name}', correlations[tf_name], on_epoch=True, prog_bar=True, logger=True)
             
             # 平均相関
             corr_values = [correlations[tf] for tf in timeframes if tf in correlations]

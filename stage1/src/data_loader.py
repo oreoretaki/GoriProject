@@ -150,7 +150,8 @@ class Stage1Dataset(Dataset):
             min_coverage=0.8,
             cache_dir=str(cache_dir),
             val_gap_days=config['validation'].get('val_gap_days', 1.0),
-            async_sampler=async_sampler
+            async_sampler=async_sampler,
+            sampling_probs=config['data'].get('sampling_probs')  # 🔥 Drop-in Sampling
         )
         
         # 注意：マスキングはモデル内で実行（data_loader側では生データを返す）

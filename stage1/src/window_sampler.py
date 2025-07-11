@@ -195,7 +195,8 @@ class MultiTFWindowSampler:
         min_coverage: float = 0.8,
         cache_dir: Optional[str] = None,
         val_gap_days: float = 1.0,
-        async_sampler: bool = False
+        async_sampler: bool = False,
+        sampling_probs: Optional[Dict[str, float]] = None
     ):
         """
         Args:
@@ -207,6 +208,7 @@ class MultiTFWindowSampler:
             cache_dir: キャッシュディレクトリ
             val_gap_days: 訓練と検証の間の時間的ギャップ（日数）
             async_sampler: 非同期サンプリングモード（各TF独立）
+            sampling_probs: 各TFのサンプリング確率（Drop-in Sampling用）
         """
         self.tf_data = tf_data
         self.seq_len = seq_len
@@ -275,6 +277,29 @@ class MultiTFWindowSampler:
             print(f"   最小サンプル数: {self.min_samples:,}")
         else:
             print(f"   最小サンプル数: {self.min_samples:,}")
+        
+        # 🔥 Drop-in Sampling 初期化
+        if async_sampler:
+            # デフォルトのサンプリング確率（データ不均衡対策）
+            if sample_counts:
+                len_min = min(sample_counts)
+                default_probs = {tf: (len_min / len(self.tf_samplers[tf]))**0.5 for tf in self.timeframes}
+            else:
+                default_probs = {tf: 1.0 for tf in self.timeframes}
+                
+            # ユーザー指定のサンプリング確率とマージ
+            self.sampling_probs = {**default_probs, **(sampling_probs or {})}
+            
+            # 空のテンソル（ドロップ時に使用）
+            import torch
+            self.empty_tensor = torch.full((self.seq_len, 6), float('nan'))
+            
+            print(f"🎲 Drop-in Sampling有効:")
+            for tf in self.timeframes:
+                print(f"   {tf}: {self.sampling_probs[tf]:.2f}")
+        else:
+            self.sampling_probs = None
+            self.empty_tensor = None
     
     def __len__(self) -> int:
         """総サンプル数を返す（モードによって異なる）"""
@@ -289,6 +314,20 @@ class MultiTFWindowSampler:
         tf_windows = {}
         for tf_name in self.timeframes:
             sampler = self.tf_samplers[tf_name]
+            
+            if self.async_sampler and self.sampling_probs is not None:
+                # 🔥 Drop-in Sampling: 確率的にドロップ
+                import torch
+                if torch.rand(()) > self.sampling_probs[tf_name]:
+                    # ドロップ: 空のテンソルを返す
+                    # DataFrameの形にする必要があるため、空のDataFrameを作成
+                    empty_df = pd.DataFrame(
+                        index=pd.date_range('2000-01-01', periods=self.seq_len, freq='1min'),
+                        columns=['open', 'high', 'low', 'close', 'spread', 'typical_price'],
+                        data=float('nan')
+                    )
+                    tf_windows[tf_name] = empty_df
+                    continue
             
             if self.async_sampler:
                 # 非同期モード: 循環インデックス（idx % len_tf）

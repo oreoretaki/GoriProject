@@ -16,6 +16,14 @@ data:
     - h4
   data_dir: "../data/derived"
   stats_file: "stats.json"
+  # 🔥 Drop-in Sampling: データ不均衡対策（短TFの重複率を下げる）
+  sampling_probs:
+    m1: 0.25    # 低頻度サンプリング
+    m5: 0.40    # 中頻度サンプリング
+    m15: 0.55   # 中頻度サンプリング
+    m30: 0.70   # 高頻度サンプリング
+    h1: 0.85    # 高頻度サンプリング
+    h4: 1.00    # 最高頻度サンプリング
 
 # モデル共通設定
 model:
@@ -102,9 +110,9 @@ normalization:
 loss:
   weights:
     recon_tf: 0.6
-    spec_tf: 0.02       # 1/10に削減（ダイナミックレンジ調整）
-    cross: 0.015        # 1/10に削減（ダイナミックレンジ調整）
-    amp_phase: 0.05
+    spec_tf: 0.01       # 🔥 さらに半分に削減（高周波抑制）
+    cross: 0.02         # 🔥 33%増加（クロス整合性重視）
+    amp_phase: 0.02     # 🔥 60%削減（位相損失抑制）
   huber_delta: 1.0
   stft_scales: [128, 256]
 

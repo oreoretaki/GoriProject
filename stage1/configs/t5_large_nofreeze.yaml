@@ -16,6 +16,13 @@ transfer_learning:
 
 # モデルアーキテクチャ（T5統合）
 model:
+  # Model v2: 非同期マルチスケール設定
+  async_sampler: false              # CLI --async_sampler で上書き可能
+  cross_pairs:                      # coarse→fine cross-attention pairs
+    - ["h4", "m1"]
+    - ["h1", "m1"] 
+    - ["m30", "m1"]
+    
   tf_stem:
     kernel_size: 3
     d_model: 1024                 # T5のd_modelに合わせる
@@ -69,6 +76,10 @@ validation:
     - "correlation_per_tf"
     - "consistency_ratio"
     - "spectral_delta"
+
+# 評価設定 (val_corr=0問題修正)
+evaluation:
+  eval_mask_ratio: 0.15              # 評価時も15%マスクを適用（学習時と同条件）
 
 # ログ・チェックポイント（10エポック最適化）
 logging:
