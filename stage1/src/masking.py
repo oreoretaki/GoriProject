@@ -119,8 +119,8 @@ class MaskingStrategy(nn.Module):
                     tf_mask = self._adapt_mask_to_tf(tf_mask, features[i], seq_len)
                     masks[i] = tf_mask
         
-        # デバッグ: 実際のマスク率を確認（初回のみ）
-        if eval_mask_ratio_override is not None and not hasattr(self, '_debug_printed'):
+        # デバッグ: 実際のマスク率を確認（完全に無効化）
+        if False:  # 🔥 デバッグ出力を完全に無効化
             actual_ratios = []
             for i in range(n_tf):
                 mask_i = masks[i] if masks.dim() == 2 else masks[0, i]
@@ -130,7 +130,6 @@ class MaskingStrategy(nn.Module):
                 print(f"   [MASK DBG] TF{i} actual mask ratio: {actual_ratio:.4f}")
             print(f"   [MASK DBG] Mean actual mask ratio: {sum(actual_ratios)/len(actual_ratios):.4f}")
             print(f"   [MASK DBG] Override: {eval_mask_ratio_override:.2f} → {eval_mask_ratio_override:.2f}")
-            self._debug_printed = True  # 🔥 初回のみ出力
                 
         return masks
         
