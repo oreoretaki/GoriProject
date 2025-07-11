@@ -907,10 +907,10 @@ def main():
         trainer_kwargs['profiler'] = args.profiler
         
     # 開発用設定（バッチ数制限）
-    if 'development' in config:
-        if 'limit_train_batches' in config['development']:
+    if 'development' in config and config['development'] is not None:
+        if 'limit_train_batches' in config['development'] and config['development']['limit_train_batches'] is not None:
             trainer_kwargs['limit_train_batches'] = config['development']['limit_train_batches']
-        if 'limit_val_batches' in config['development']:
+        if 'limit_val_batches' in config['development'] and config['development']['limit_val_batches'] is not None:
             trainer_kwargs['limit_val_batches'] = config['development']['limit_val_batches']
         
     trainer = pl.Trainer(**trainer_kwargs)
