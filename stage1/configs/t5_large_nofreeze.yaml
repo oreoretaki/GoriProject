@@ -99,7 +99,7 @@ dataloader:
   num_workers: 0                  # 🔥 WSL用: マルチプロセシング無効化
   pin_memory: false               # 🔥 WSL用: メモリピン無効化
   persistent_workers: false       # 🔥 WSL用: ワーカー持続無効化
-  prefetch_factor: 2              # 基本値に戻す
+  # prefetch_factor: 2            # 🔥 num_workers=0時は無効（エラー回避）
 
 # 開発用設定（全データ投入）
 development:
