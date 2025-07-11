@@ -470,9 +470,13 @@ class GradualUnfreezingCallback(Callback):
         """エポック開始時にT5エンコーダーの凍結状態を制御"""
         current_epoch = trainer.current_epoch
         
+        print(f"🔍 GradualUnfreezingCallback: epoch={current_epoch}, freeze_epochs={self.freeze_epochs}, unfrozen={self.unfrozen}")
+        
         # T5アダプターが使用されているかチェック
         if hasattr(pl_module.model, 'shared_encoder') and \
            isinstance(pl_module.model.shared_encoder, T5TimeSeriesAdapter):
+            
+            print(f"🔍 T5TimeSeriesAdapter検出済み")
             
             if current_epoch >= self.freeze_epochs and not self.unfrozen:
                 pl_module.model.shared_encoder.unfreeze_t5_encoder()
@@ -483,6 +487,10 @@ class GradualUnfreezingCallback(Callback):
                 pl_module.model.shared_encoder.freeze_t5_encoder()
                 self.unfrozen = False
                 print(f"🔒 エポック{current_epoch}: T5エンコーダーを再凍結")
+            else:
+                print(f"🔍 解凍条件不満: current_epoch={current_epoch}, freeze_epochs={self.freeze_epochs}, unfrozen={self.unfrozen}")
+        else:
+            print(f"🔍 T5TimeSeriesAdapter未検出")
 
 
 def create_differential_learning_rate_groups(model, base_lr: float, t5_lr_factor: float = 0.1, 
