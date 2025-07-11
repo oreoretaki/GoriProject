@@ -858,8 +858,8 @@ def main():
                 print("✅ ウォームアップ完了")
             
             # 3) コンパイル適用（ベクトル化モデルで最適化）
-            model.model = torch.compile(model.model, backend="inductor", mode="default")  # 🔥 defaultモードで安全に
-            print("✅ TorchCompile適用完了（ベクトル化モデル + 事前ウォームアップ済み）")
+            # model.model = torch.compile(model.model, backend="inductor", mode="default")  # 🔥 一時的に無効化
+            print("✅ TorchCompile一時無効化（CUDA開発環境問題回避）")
             
         except Exception as e:
             print(f"⚠️ TorchCompile失敗、通常モード: {e}")
