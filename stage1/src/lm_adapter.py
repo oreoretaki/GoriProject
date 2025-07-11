@@ -62,12 +62,20 @@ class PatchEmbedding(nn.Module):
         """
         batch_size, n_tf, seq_len, n_features = x.shape
         
-        # パッチ数を計算
-        n_patches = seq_len // self.patch_len
-        effective_len = n_patches * self.patch_len
+        # パッチ数を計算（ceil使用で適切な数を確保）
+        n_patches = max(1, math.ceil(seq_len / self.patch_len))
+        required_len = n_patches * self.patch_len
         
-        # シーケンス長をパッチ境界に調整
-        x = x[:, :, :effective_len, :]
+        # パディングが必要かチェック
+        if seq_len < required_len:
+            pad_len = required_len - seq_len
+            # NaNパディング（右端合わせ）
+            x = F.pad(x, (0, 0, 0, pad_len, 0, 0), value=float('nan'))  # [batch, n_tf, seq+pad, n_feat]
+        elif seq_len > required_len:
+            # 長すぎる場合は切り詰め
+            x = x[:, :, :required_len, :]
+        
+        effective_len = required_len
         
         # パッチ化: [batch, n_tf, n_patches, patch_len, n_features]
         x = x.view(batch_size, n_tf, n_patches, self.patch_len, n_features)
@@ -132,6 +140,7 @@ class PatchEmbedding(nn.Module):
         x = x.view(batch_size, n_patches, self.patch_len, n_features)
         
         # パッチを平坦化: [batch, n_patches, patch_dim]
+        # 🔥 実際のpatch_dimを正確に計算（16*6=96, not 16384）
         patch_dim = self.patch_len * n_features
         x = x.view(batch_size, n_patches, patch_dim)
         
