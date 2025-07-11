@@ -67,9 +67,16 @@ class VectorizedStage1Model(nn.Module):
             try:
                 from .lm_adapter import T5TimeSeriesAdapter
                 print("🤗 T5転移学習を使用します（ベクトル化版・共有エンコーダー）")
-                return T5TimeSeriesAdapter(self.config)
-            except ImportError:
-                print("⚠️ T5未利用 - FlashAttention2対応Transformerエンコーダーを使用")
+                t5_adapter = T5TimeSeriesAdapter(self.config)
+                print(f"   T5モデル: {self.config.get('transfer_learning', {}).get('lm_name_or_path', 'unknown')}")
+                return t5_adapter
+            except ImportError as e:
+                print(f"⚠️ T5未利用 - ImportError: {e}")
+                print("   FlashAttention2対応Transformerエンコーダーを使用")
+                return self._create_flash_attention_encoder()
+            except Exception as e:
+                print(f"⚠️ T5初期化失敗 - Error: {e}")
+                print("   FlashAttention2対応Transformerエンコーダーを使用")
                 return self._create_flash_attention_encoder()
         else:
             print("📦 従来のTransformerエンコーダーを使用します（ベクトル化版）")

@@ -34,8 +34,8 @@ class VectorizedMaskingStrategy(nn.Module):
         print(f"   スパン範囲: {self.mask_span_min}-{self.mask_span_max}")
         print(f"   TF間同期: {self.sync_across_tf}")
         
-        # torch乱数生成器
-        self.generator = torch.Generator()
+        # torch乱数生成器（デバイス対応）
+        self.generator = None  # 実行時に設定
         
     def generate_masks_dict(self, features: Dict[str, torch.Tensor], seed: int = None, eval_mask_ratio_override: float = None) -> Dict[str, torch.Tensor]:
         """
@@ -49,6 +49,11 @@ class VectorizedMaskingStrategy(nn.Module):
         Returns:
             masks: Dict[tf_name, torch.Tensor] - [batch, seq_len] bool
         """
+        # 🔥 デバイス対応generator初期化
+        device = next(iter(features.values())).device
+        if self.generator is None:
+            self.generator = torch.Generator(device=device)
+        
         if seed is not None:
             self.generator.manual_seed(seed)
             
