@@ -254,22 +254,24 @@ class Stage1LightningModule(pl.LightningModule):
             self._amp_scale_start = self.trainer.precision_plugin.scaler.get_scale()
     
     def on_after_backward(self) -> None:
-        """勾配ノルム監視 & AMPオーバーフロー検知"""
+        """勾配ノルム監視 & AMPオーバーフロー検知（高速化版）"""
         
-        # ---- 1) grad_norm 計測 & ログ ----
-        grad_norms = [p.grad.detach().float().norm() 
-                      for p in self.parameters() if p.grad is not None]
-        if grad_norms:
-            grad_norm = torch.linalg.vector_norm(torch.stack(grad_norms), ord=2)
-        else:
-            grad_norm = torch.tensor(0.0)
-            
+        # ---- 1) 効率的な勾配ノルム計測 & クリッピング ----
+        LOG_INTERVAL = 200  # ログ間隔
+        need_log = (self.trainer.global_step % LOG_INTERVAL == 0)
+        
+        # 🔥 clip_grad_norm_ は1回のスキャンで L2ノルムを返す（高速）
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.parameters(),
+            max_norm=self.config['training']['gradient_clip']
+        )
+        
         # inf/nanを1e3に丸めて可視化だけは続行
         if not torch.isfinite(grad_norm):
             grad_norm = torch.tensor(1e3, device=self.device)
             
         # 🔥 grad_norm は200step毎のみログ（stdout削減）
-        if hasattr(self.trainer, 'global_step') and self.trainer.global_step % 200 == 0:
+        if need_log:
             self.log("grad_norm", grad_norm,
                      on_step=True, on_epoch=False, prog_bar=True, logger=True)
         
@@ -284,18 +286,14 @@ class Stage1LightningModule(pl.LightningModule):
                 overflow = 1.0 if scaler._scale.item() == 0 else 0.0
                 
         # 🔥 amp_overflow は200step毎のみログ（stdout削減）
-        if hasattr(self.trainer, 'global_step') and self.trainer.global_step % 200 == 0:
+        if need_log:
             self.log("amp_overflow", overflow,
                      on_step=True, on_epoch=False, prog_bar=True, logger=True)
         
-        # ---- 3) 勾配クリッピング（オーバーフロー対策もLightningに任せる）----
-        # クリッピング前後の値を記録
-        grad_norm_before = grad_norm if torch.isfinite(grad_norm) else torch.tensor(1e3)
-        grad_norm_after = torch.nn.utils.clip_grad_norm_(self.parameters(), 
-                                                         max_norm=self.config['training']['gradient_clip'])
-        # クリップされたかを記録
-        if grad_norm_before > self.config['training']['gradient_clip']:
-            clipped_ratio = grad_norm_after / grad_norm_before
+        # ---- 3) クリッピング後の補助ログ（任意）----
+        # クリッピング率を見たい場合だけ計算する
+        if need_log and grad_norm > self.config['training']['gradient_clip']:
+            clipped_ratio = self.config['training']['gradient_clip'] / grad_norm
             self.log("grad_norm_clipped", clipped_ratio,
                      on_step=True, on_epoch=False, prog_bar=False, logger=True)
     
