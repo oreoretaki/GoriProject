@@ -24,10 +24,21 @@ class VectorizedStage1Model(nn.Module):
         # 🔥 完全ベクトル化マスキング戦略
         self.masking_strategy = VectorizedMaskingStrategy(config, self.n_features)
         
-        # TF-specific stems (keep individual for different sequence lengths)
-        self.tf_stems = nn.ModuleDict({
-            tf: self._create_tf_stem() for tf in self.timeframes
-        })
+        # 🔥 TF-specific stems: groups対応版と個別版のハイブリッド
+        self.use_grouped_stem = True  # groups=n_tf使用フラグ
+        if self.use_grouped_stem:
+            # groups=n_tf版（全TFで同じカーネル使用）
+            self.grouped_stem = nn.Conv1d(
+                self.n_features, self.d_model, 
+                kernel_size=3, padding=1, groups=1  # まずは1つのカーネル
+            )
+            self.stem_norm = nn.LayerNorm(self.d_model)
+            self.stem_activation = nn.GELU()
+        else:
+            # 個別版（フォールバック）
+            self.tf_stems = nn.ModuleDict({
+                tf: self._create_tf_stem() for tf in self.timeframes
+            })
         
         # 🔥 共有エンコーダー（1回だけ呼び出し）
         self.shared_encoder = self._create_shared_encoder()
@@ -201,9 +212,16 @@ class VectorizedStage1Model(nn.Module):
     
     def _process_stems_parallel(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
-        🔥 TF-specific stem処理を並列化
-        異なるseq_lenでも可能な限り並列処理
+        🔥 TF-specific stem処理を真の並列化
+        groups=n_tf で完全に1回のConv1d呼び出し
         """
+        if self.use_grouped_stem:
+            return self._process_stems_grouped(batch)
+        else:
+            return self._process_stems_individual(batch)
+    
+    def _process_stems_grouped(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """🔥 groups=n_tf版: 完全並列化"""
         stemmed_features = {}
         
         # 同一seq_lenのTFをグループ化
@@ -216,35 +234,42 @@ class VectorizedStage1Model(nn.Module):
         
         # 各seq_lenグループで並列処理
         for seq_len, tf_list in seq_len_groups.items():
-            if len(tf_list) == 1:
-                # 単一TFの場合は個別処理
-                tf_name, tf_features = tf_list[0]
-                x = tf_features.transpose(1, 2)
-                x = self.tf_stems[tf_name](x)
-                stemmed_features[tf_name] = x.transpose(1, 2)
-            else:
-                # 複数TFの場合はバッチ処理
-                tf_names = [tf_name for tf_name, _ in tf_list]
-                tf_features_list = [tf_features for _, tf_features in tf_list]
-                
-                # スタックして並列処理
-                stacked_features = torch.stack(tf_features_list, dim=1)  # [batch, n_tf, seq_len, n_features]
-                batch_size, n_tf, seq_len, n_features = stacked_features.shape
-                
-                # [batch*n_tf, seq_len, n_features] → [batch*n_tf, n_features, seq_len]
-                reshaped = stacked_features.view(batch_size * n_tf, seq_len, n_features).transpose(1, 2)
-                
-                # 各TFのstemを適用（まだ個別だが、将来的にgroups対応可能）
-                processed = []
-                for i, tf_name in enumerate(tf_names):
-                    tf_data = reshaped[i::n_tf]  # 各TFのデータを取得
-                    processed_data = self.tf_stems[tf_name](tf_data)
-                    processed.append(processed_data)
-                
-                # 結果を再構築
-                for i, tf_name in enumerate(tf_names):
-                    stemmed_features[tf_name] = processed[i].transpose(1, 2)
+            tf_names = [tf_name for tf_name, _ in tf_list]
+            tf_features_list = [tf_features for _, tf_features in tf_list]
+            
+            # スタックして並列処理
+            stacked_features = torch.stack(tf_features_list, dim=1)  # [batch, n_tf, seq_len, n_features]
+            batch_size, n_tf, seq_len, n_features = stacked_features.shape
+            
+            # [batch*n_tf, n_features, seq_len] に変換
+            reshaped = stacked_features.view(batch_size * n_tf, seq_len, n_features).transpose(1, 2)
+            
+            # 🔥 1回のConv1d呼び出しで全TF処理
+            processed = self.grouped_stem(reshaped)  # [batch*n_tf, d_model, seq_len]
+            
+            # [batch*n_tf, seq_len, d_model] に変換
+            processed = processed.transpose(1, 2)
+            
+            # 正規化とアクティベーション
+            processed = self.stem_norm(processed)
+            processed = self.stem_activation(processed)
+            
+            # [batch, n_tf, seq_len, d_model] に戻す
+            processed = processed.view(batch_size, n_tf, seq_len, self.d_model)
+            
+            # 各TFに分離
+            for i, tf_name in enumerate(tf_names):
+                stemmed_features[tf_name] = processed[:, i]  # [batch, seq_len, d_model]
         
+        return stemmed_features
+    
+    def _process_stems_individual(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """個別版: フォールバック処理"""
+        stemmed_features = {}
+        for tf_name, tf_features in batch.items():
+            x = tf_features.transpose(1, 2)
+            x = self.tf_stems[tf_name](x)
+            stemmed_features[tf_name] = x.transpose(1, 2)
         return stemmed_features
     
     def get_model_info(self) -> Dict:

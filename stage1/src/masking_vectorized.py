@@ -157,25 +157,27 @@ class VectorizedMaskingStrategy(nn.Module):
         batch_indices = torch.arange(batch_size, device=device)[:, None]  # [batch, 1]
         span_indices = torch.arange(estimated_spans, device=device)[None, :]  # [1, spans]
         
-        # 各スパンに対してマスクを適用
-        for s in range(estimated_spans):
-            # 開始・終了位置を取得
-            starts = start_positions[:, s]  # [batch]
-            ends = end_positions[:, s]      # [batch]
+        # 🔥 完全ベクトル化: for-sループも除去
+        # 1) 最大スパン長を取得
+        span_lengths = end_positions - start_positions  # [batch, spans]
+        max_span_len = span_lengths.max().item()
+        
+        if max_span_len > 0:
+            # 2) インデックス範囲を作成
+            idx = torch.arange(max_span_len, device=device)  # [L]
             
-            # 各バッチの各スパンに対して範囲インデックスを生成
-            max_span_len = (ends - starts).max().item()
-            if max_span_len > 0:
-                # 範囲インデックスを生成: [batch, max_span_len]
-                range_indices = torch.arange(max_span_len, device=device)[None, :] + starts[:, None]
-                
-                # 有効範囲のマスクを作成
-                valid_mask = (torch.arange(max_span_len, device=device)[None, :] < (ends - starts)[:, None])
-                valid_mask = valid_mask & (range_indices < seq_len)
-                
-                # マスクを適用
-                batch_idx = batch_indices[:, 0][:, None].expand(-1, max_span_len)
-                masks[batch_idx[valid_mask], range_indices[valid_mask]] = True
+            # 3) スパンマスクを作成 [batch, spans, L]
+            span_mask = (idx[None, None, :] < span_lengths[:, :, None])
+            
+            # 4) 範囲インデックスを作成 [batch, spans, L]
+            range_idx = idx[None, None, :] + start_positions[:, :, None]
+            
+            # 5) 有効範囲のマスクを作成
+            valid_mask = span_mask & (range_idx < seq_len)
+            
+            # 6) scatter_でマスクを一括適用
+            batch_idx = torch.arange(batch_size, device=device)[:, None, None].expand(-1, estimated_spans, max_span_len)
+            masks[batch_idx[valid_mask], range_idx[valid_mask]] = True
         
         # 🔥 マスク数を正確に調整（バッチ並列）
         masks = self._adjust_mask_count_vectorized(masks, target_masked)

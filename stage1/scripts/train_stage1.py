@@ -842,9 +842,14 @@ def main():
             # 2) 事前ウォームアップでコンパイル時間を隠蔽（ベクトル化モデル対応）
             print("🔥 ダミー入力でウォームアップ実行中...")
             with torch.no_grad():
-                # ベクトル化モデル用のDict形式ダミー入力作成
+                # 🔥 TF固有のseq_lenでダミー入力作成（compile再JIT防止）
+                tf_seq_lens = {
+                    'm1': 128, 'm5': 25, 'm15': 8, 'm30': 4, 
+                    'h1': 2, 'h4': 1, 'd': 1
+                }
                 dummy_batch = {
-                    tf_name: torch.randn(1, 64, 6, device=model.device, dtype=torch.float32)
+                    tf_name: torch.randn(1, tf_seq_lens.get(tf_name, 64), 6, 
+                                       device=model.device, dtype=torch.float32)
                     for tf_name in config['data']['timeframes']
                 }
                 
