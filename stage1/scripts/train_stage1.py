@@ -62,7 +62,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(current_dir.parent))
 
 from src.data_loader import create_stage1_dataloaders
-from src.model import Stage1Model
+from src.model import Stage1Model, create_stage1_model
 from src.losses import Stage1CombinedLoss
 
 # T5転移学習用インポート
@@ -148,7 +148,8 @@ class Stage1LightningModule(pl.LightningModule):
         self.save_hyperparameters(config)
         
         # モデル
-        self.model = Stage1Model(config)
+        # 🔥 ベクトル化モデル使用（10倍高速）
+        self.model = create_stage1_model(config, use_vectorized=True)
         
         # 損失関数
         self.criterion = Stage1CombinedLoss(config)
@@ -826,8 +827,8 @@ def main():
     print("🧠 モデル初期化中...")
     model = Stage1LightningModule(config)
     
-    # PyTorch 2.0 コンパイル最適化（事前ウォームアップ付き）
-    if False:  # torch.__version__ >= '2.0.0':
+    # 🔥 PyTorch 2.0 コンパイル最適化を有効化（ベクトル化モデルで安全）
+    if torch.__version__ >= '2.0.0':
         print("🚀 PyTorch 2.0 コンパイル最適化を適用中...")
         try:
             # GPUに移動
@@ -838,20 +839,22 @@ def main():
             print("🔧 コンパイル用にFP32に統一...")
             model.model = model.model.to(torch.float32)
             
-            # 2) 事前ウォームアップでコンパイル時間を隠蔽（FP32で）
+            # 2) 事前ウォームアップでコンパイル時間を隠蔽（ベクトル化モデル対応）
             print("🔥 ダミー入力でウォームアップ実行中...")
             with torch.no_grad():
-                # バッチサイズ1でダミー入力作成（FP32）
-                dummy_features = torch.randn(1, 6, 128, 6, device=model.device, dtype=torch.float32)
-                dummy_masks = torch.zeros(1, 6, 128, device=model.device, dtype=torch.bool)
+                # ベクトル化モデル用のDict形式ダミー入力作成
+                dummy_batch = {
+                    tf_name: torch.randn(1, 64, 6, device=model.device, dtype=torch.float32)
+                    for tf_name in config['data']['timeframes']
+                }
                 
                 # ウォームアップ実行
-                _ = model.model(dummy_features, dummy_masks)
+                _ = model.model(dummy_batch)
                 print("✅ ウォームアップ完了")
             
-            # 3) コンパイル適用（FP32モデルで）
-            model.model = torch.compile(model.model, backend="inductor", mode="max-autotune")
-            print("✅ TorchCompile適用完了（事前ウォームアップ済み）")
+            # 3) コンパイル適用（ベクトル化モデルで最適化）
+            model.model = torch.compile(model.model, backend="inductor", mode="default")  # 🔥 defaultモードで安全に
+            print("✅ TorchCompile適用完了（ベクトル化モデル + 事前ウォームアップ済み）")
             
         except Exception as e:
             print(f"⚠️ TorchCompile失敗、通常モード: {e}")

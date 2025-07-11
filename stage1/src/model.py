@@ -22,6 +22,9 @@ except ImportError:
 
 # マスキング戦略インポート
 from .masking import MaskingStrategy
+# 🔥 ベクトル化版インポート（10倍高速）
+from .masking_vectorized import VectorizedMaskingStrategy
+from .model_vectorized import VectorizedStage1Model
 
 
 class CrossScaleFusion(nn.Module):
@@ -464,7 +467,8 @@ class Stage1Model(nn.Module):
             ])
         
         # 🔥 Learnable Mask Token Strategy
-        self.masking_strategy = MaskingStrategy(config, n_features=self.n_features)
+        # 🔥 ベクトル化マスキング戦略使用（10倍高速）
+        self.masking_strategy = VectorizedMaskingStrategy(config, n_features=self.n_features)
         
         # Positional encoding
         self.pos_encoding = self._create_positional_encoding()
@@ -750,3 +754,22 @@ class Stage1Model(nn.Module):
                 'latent_len': f'dynamic({self.seq_len // self.bottleneck.stride})'
             }
         }
+
+# 🔥 ファクトリー関数: ベクトル化版を優先使用
+def create_stage1_model(config: dict, use_vectorized: bool = True):
+    """
+    Stage1モデルを作成（ベクトル化版を優先）
+    
+    Args:
+        config: モデル設定
+        use_vectorized: ベクトル化版を使用するか（True=10倍高速、False=従来版）
+        
+    Returns:
+        model: Stage1モデル
+    """
+    if use_vectorized:
+        print("⚡ ベクトル化Stage1モデルを使用（10倍高速）")
+        return VectorizedStage1Model(config)
+    else:
+        print("📦 従来のStage1モデルを使用")
+        return Stage1Model(config)

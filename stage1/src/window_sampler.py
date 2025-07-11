@@ -60,11 +60,9 @@ class SingleTFWindowSampler:
         m1_duration_minutes = seq_len * 1  # M1は1分間隔
         self.seq_len = max(1, int(m1_duration_minutes / self.tf_step_minutes))
         
-        print(f"🔍 SingleTFWindowSampler({tf_name})")
-        print(f"   データ期間: {tf_data.index[0]} - {tf_data.index[-1]}")
-        print(f"   レコード数: {len(tf_data):,}")
-        print(f"   シーケンス長: {self.seq_len} (M1={seq_len}基準)")
-        print(f"   TF間隔: {self.tf_step_minutes}分")
+        # 🔥 stdout削減: 詳細出力を最小化
+        if tf_name == 'm1':  # M1の場合のみ出力
+            print(f"🔍 SingleTFWindowSampler初期化中... ({len(self.timeframes)} TFs)")
         
         # 有効ウィンドウ検索
         self.valid_windows = self._find_valid_windows()
@@ -72,8 +70,9 @@ class SingleTFWindowSampler:
         # 訓練/検証分割（TF固有gap適用）
         self.split_windows = self._split_windows()
         
-        print(f"   総ウィンドウ数: {len(self.valid_windows)}")
-        print(f"   {split}ウィンドウ数: {len(self.split_windows)}")
+        # 🔥 stdout削減: 総ウィンドウ数のみ出力
+        if tf_name == 'm1':
+            print(f"   総ウィンドウ数: {len(self.valid_windows)}")
         
     def _find_valid_windows(self) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
         """単一TFでの有効ウィンドウを検索"""
@@ -127,8 +126,9 @@ class SingleTFWindowSampler:
         val_gap_minutes = int(self.val_gap_days * 24 * 60)
         tf_gap_windows = int(val_gap_minutes / self.tf_step_minutes)
         
-        print(f"   🕐 TF固有ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分")
-        print(f"   📊 {self.tf_name} gap窓数: {tf_gap_windows} ({self.tf_step_minutes}分間隔)")
+        # 🔥 stdout削減: デバッグ情報をコメントアウト
+        # print(f"   🕐 TF固有ギャップ: {self.val_gap_days}日 = {val_gap_minutes}分")
+        # print(f"   📊 {self.tf_name} gap窓数: {tf_gap_windows} ({self.tf_step_minutes}分間隔)")
         
         if self.split == "train":
             # 訓練: 最後の (n_val + tf_gap_windows) を除外
@@ -222,10 +222,9 @@ class MultiTFWindowSampler:
         # タイムフレーム名リスト
         self.timeframes = list(tf_data.keys())
         
+        # 🔥 stdout削減: 最小限の情報のみ出力
         mode_str = "非同期版" if async_sampler else "ラッパー版"
-        print(f"🔄 MultiTFWindowSampler初期化 ({split}) - {mode_str}")
-        print(f"   TF数: {len(self.timeframes)}")
-        print(f"   TF: {self.timeframes}")
+        print(f"🔄 MultiTFWindowSampler初期化 ({split}) - {mode_str} - {len(self.timeframes)}TFs")
         
         # 各TFに対してSingleTFWindowSamplerを作成
         self.tf_samplers = {}
