@@ -127,9 +127,22 @@ class PatchEmbedding(nn.Module):
         patch_dim = self.patch_len * n_features
         x = x.view(batch_size, n_patches, patch_dim)
         
-        # 指定TFの投影層を使用
-        tf_idx = min(tf_idx, len(self.patch_projections) - 1)  # 範囲外対策
-        patches = self.patch_projections[tf_idx](x)  # [batch, n_patches, d_model]
+        # Dynamic patch projection for async mode
+        # async modeでは実際のinput featuresに合わせて動的に処理
+        expected_patch_dim = self.patch_len * self.n_features
+        if patch_dim != expected_patch_dim:
+            # 動的にlinear layerを作成（初回のみ）
+            dynamic_key = f"dynamic_patch_proj_{tf_idx}_{patch_dim}"
+            if not hasattr(self, dynamic_key):
+                dynamic_proj = nn.Linear(patch_dim, self.d_model).to(x.device)
+                setattr(self, dynamic_key, dynamic_proj)
+                print(f"🔧 Dynamic patch projection created: {patch_dim} -> {self.d_model}")
+            
+            patches = getattr(self, dynamic_key)(x)
+        else:
+            # 通常の投影層を使用
+            tf_idx = min(tf_idx, len(self.patch_projections) - 1)  # 範囲外対策
+            patches = self.patch_projections[tf_idx](x)  # [batch, n_patches, d_model]
         
         # 位置エンコーディング追加
         pos_emb = self.pos_embedding[:, :n_patches, :]  # [1, n_patches, d_model]
