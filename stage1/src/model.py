@@ -690,8 +690,10 @@ class Stage1Model(nn.Module):
                 
                 pos_ids = torch.arange(seq_len, device=masked_features.device).unsqueeze(0).expand(batch_size, -1)
                 pos_emb = self.pos_encoding(pos_ids).unsqueeze(1)
-                encoded = tf_embeddings + pos_emb
-                encoded = self.shared_encoder(encoded.view(batch_size, -1, encoded.shape[-1]))
+                tf_embeddings = tf_embeddings + pos_emb
+                
+                # SharedEncoder expects [batch, n_tf, seq_len, d_model]
+                encoded = self.shared_encoder(tf_embeddings)
         else:
             # Fallback to individual processing
             tf_embeddings = []
@@ -700,13 +702,17 @@ class Stage1Model(nn.Module):
                 tf_embeddings.append(stem_out)
             encoded = torch.stack(tf_embeddings, dim=1)
         
+        # Bottleneck processing
+        compressed = self.bottleneck(encoded)
+        
         # Decode
         reconstructed = []
         for i in range(n_tf):
             if hasattr(self, 'tf_decoders') and i < len(self.tf_decoders):
-                decoder_out = self.tf_decoders[i](encoded[:, i])
+                # compressed[:, i] should be [batch, latent_len, d_model]
+                decoder_out = self.tf_decoders[i](compressed[:, i])
             else:
-                decoder_out = encoded[:, i]
+                decoder_out = compressed[:, i]
             reconstructed.append(decoder_out)
         
         reconstructed = torch.stack(reconstructed, dim=1)
