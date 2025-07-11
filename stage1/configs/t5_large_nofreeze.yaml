@@ -105,3 +105,6 @@ dataloader:
 development:
   # limit_train_batches: 2383      # 🔥 制限解除：全データ投入
   # limit_val_batches: 606         # 🔥 制限解除：全データ投入
+  # 🔥 shared_base.yamlの制限をオーバーライド
+  limit_train_batches: null         # 完全に制限解除
+  limit_val_batches: null           # 完全に制限解除
