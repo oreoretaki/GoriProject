@@ -76,7 +76,7 @@ class MaskingStrategy(nn.Module):
         effective_mask_ratio = self.mask_ratio
         if eval_mask_ratio_override is not None:
             effective_mask_ratio = eval_mask_ratio_override
-            print(f"   [MASK DBG] Override: {self.mask_ratio} → {effective_mask_ratio}")
+            # print(f"   [MASK DBG] Override: {self.mask_ratio} → {effective_mask_ratio}")  # 🔇 無効化
             
         # 🔥 バッチサイズに応じてマスクの形状を決定（bool型で統一）
         if features.dim() == 4:
