@@ -73,21 +73,24 @@ class STFTLoss(nn.Module):
                         
                     hop_length = int(scale * self.hop_ratio)
                     
-                    # STFT計算（16bit混合精度との互換性のため32bitに変換）
-                    pred_signal_32 = pred_signal.to(torch.float32)
-                    target_signal_32 = target_signal.to(torch.float32)
-                    pred_stft = torch.stft(
-                        pred_signal_32, 
-                        n_fft=scale, 
-                        hop_length=hop_length, 
-                        return_complex=True
-                    )
-                    target_stft = torch.stft(
-                        target_signal_32, 
-                        n_fft=scale, 
-                        hop_length=hop_length, 
-                        return_complex=True
-                    )
+                    # STFT計算（BF16対応: 必ずFP32/CUDAで実行）
+                    with torch.cuda.amp.autocast(enabled=False):  # BF16→FP32 autocast無効化
+                        # 明示的にFP32/CUDAに変換（CPU fallback防止）
+                        pred_signal_32 = pred_signal.float().cuda()
+                        target_signal_32 = target_signal.float().cuda()
+                        
+                        pred_stft = torch.stft(
+                            pred_signal_32, 
+                            n_fft=scale, 
+                            hop_length=hop_length, 
+                            return_complex=True
+                        )
+                        target_stft = torch.stft(
+                            target_signal_32, 
+                            n_fft=scale, 
+                            hop_length=hop_length, 
+                            return_complex=True
+                        )
                     
                     # マグニチュード損失
                     pred_mag = torch.abs(pred_stft)
@@ -220,11 +223,12 @@ class AmplitudePhaseCorrelationLoss(nn.Module):
                 pred_signal = pred[:, tf_idx, :, feat_idx]  # [batch, seq_len]
                 target_signal = target[:, tf_idx, :, feat_idx]  # [batch, seq_len]
                 
-                # FFT計算（16bit混合精度との互換性のため32bitに変換）
-                pred_signal_32 = pred_signal.to(torch.float32)
-                target_signal_32 = target_signal.to(torch.float32)
-                pred_fft = torch.fft.fft(pred_signal_32, dim=-1)
-                target_fft = torch.fft.fft(target_signal_32, dim=-1)
+                # FFT計算（BF16対応: 必ずFP32/CUDAで実行）
+                with torch.cuda.amp.autocast(enabled=False):  # BF16→FP32 autocast無効化
+                    pred_signal_32 = pred_signal.float().cuda()
+                    target_signal_32 = target_signal.float().cuda()
+                    pred_fft = torch.fft.fft(pred_signal_32, dim=-1)
+                    target_fft = torch.fft.fft(target_signal_32, dim=-1)
                 
                 # 振幅
                 pred_amp = torch.abs(pred_fft)
@@ -488,21 +492,22 @@ class Stage1CombinedLoss(nn.Module):
                             
                         hop_length = int(scale * self.stft_loss.hop_ratio)
                         
-                        # STFT計算
-                        pred_seq_32 = pred_seq.to(torch.float32)
-                        target_seq_32 = target_seq.to(torch.float32)
-                        pred_stft = torch.stft(
-                            pred_seq_32, 
-                            n_fft=scale, 
-                            hop_length=hop_length, 
-                            return_complex=True
-                        )
-                        target_stft = torch.stft(
-                            target_seq_32, 
-                            n_fft=scale, 
-                            hop_length=hop_length, 
-                            return_complex=True
-                        )
+                        # STFT計算（BF16対応: 必ずFP32/CUDAで実行）
+                        with torch.cuda.amp.autocast(enabled=False):  # BF16→FP32 autocast無効化
+                            pred_seq_32 = pred_seq.float().cuda()
+                            target_seq_32 = target_seq.float().cuda()
+                            pred_stft = torch.stft(
+                                pred_seq_32, 
+                                n_fft=scale, 
+                                hop_length=hop_length, 
+                                return_complex=True
+                            )
+                            target_stft = torch.stft(
+                                target_seq_32, 
+                                n_fft=scale, 
+                                hop_length=hop_length, 
+                                return_complex=True
+                            )
                         
                         # マグニチュード損失
                         pred_mag = torch.abs(pred_stft)
@@ -550,11 +555,12 @@ class Stage1CombinedLoss(nn.Module):
                     if len(pred_seq) < 8:  # FFT計算に必要な最小長
                         continue
                         
-                    # FFT計算
-                    pred_seq_32 = pred_seq.to(torch.float32)
-                    target_seq_32 = target_seq.to(torch.float32)
-                    pred_fft = torch.fft.fft(pred_seq_32)
-                    target_fft = torch.fft.fft(target_seq_32)
+                    # FFT計算（BF16対応: 必ずFP32/CUDAで実行）
+                    with torch.cuda.amp.autocast(enabled=False):  # BF16→FP32 autocast無効化
+                        pred_seq_32 = pred_seq.float().cuda()
+                        target_seq_32 = target_seq.float().cuda()
+                        pred_fft = torch.fft.fft(pred_seq_32)
+                        target_fft = torch.fft.fft(target_seq_32)
                     
                     # 振幅・位相
                     pred_amp = torch.abs(pred_fft)
