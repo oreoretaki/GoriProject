@@ -502,6 +502,9 @@ class Stage1Model(nn.Module):
     
     def _forward_async(self, batch: Dict[str, torch.Tensor], eval_mask_ratio: Optional[float] = None) -> Dict[str, torch.Tensor]:
         """Async mode forward pass with variable-length support"""
+        # ❶ 元のシーケンス長を記録
+        orig_lens: Dict[str, int] = {tf: x.shape[1] for tf, x in batch.items()}
+        
         encoded = {}
         padding_masks = {}
         training_masks = {}
@@ -570,7 +573,10 @@ class Stage1Model(nn.Module):
             # TF-specific decoder (latent_len=1として処理)
             outputs[tf] = self.tf_decoders[tf](z_latent)  # [B, seq_len, 4]
         
-        return outputs
+        # ❸ 元のシーケンス長に切り戻し
+        trimmed_outputs = {tf: outputs[tf][:, :orig_lens[tf]] for tf in outputs.keys()}
+        
+        return trimmed_outputs
     
     def _forward_sync(self, batch: Dict[str, torch.Tensor], eval_mask_ratio: Optional[float] = None) -> Dict[str, torch.Tensor]:
         """Legacy sync mode forward pass - convert Dict to tensor format"""
