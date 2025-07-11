@@ -148,8 +148,8 @@ class Stage1LightningModule(pl.LightningModule):
         self.save_hyperparameters(config)
         
         # モデル
-        # 🔥 ベクトル化モデル使用（10倍高速）
-        self.model = create_stage1_model(config, use_vectorized=True)
+        # 🔥 一旦従来モデルで動作確認（全修正適用済み）
+        self.model = create_stage1_model(config, use_vectorized=False)
         
         # 損失関数
         self.criterion = Stage1CombinedLoss(config)

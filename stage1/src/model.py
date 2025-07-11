@@ -467,8 +467,8 @@ class Stage1Model(nn.Module):
             ])
         
         # 🔥 Learnable Mask Token Strategy
-        # 🔥 ベクトル化マスキング戦略使用（10倍高速）
-        self.masking_strategy = VectorizedMaskingStrategy(config, n_features=self.n_features)
+        # 🔥 一旦従来のマスキング戦略を使用（動作確認のため）
+        self.masking_strategy = MaskingStrategy(config, n_features=self.n_features)
         
         # Positional encoding
         self.pos_encoding = self._create_positional_encoding()
@@ -756,7 +756,7 @@ class Stage1Model(nn.Module):
         }
 
 # 🔥 ファクトリー関数: ベクトル化版を優先使用
-def create_stage1_model(config: dict, use_vectorized: bool = True):
+def create_stage1_model(config: dict, use_vectorized: bool = False):
     """
     Stage1モデルを作成（ベクトル化版を優先）
     
