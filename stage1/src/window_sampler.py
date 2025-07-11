@@ -290,6 +290,10 @@ class MultiTFWindowSampler:
             # ユーザー指定のサンプリング確率とマージ
             self.sampling_probs = {**default_probs, **(sampling_probs or {})}
             
+            # 🔥 M1は必ず1.0に固定（Cross-loss計算に必要）
+            if 'm1' in self.sampling_probs:
+                self.sampling_probs['m1'] = 1.0
+            
             # 空のテンソル（ドロップ時に使用）
             import torch
             self.empty_tensor = torch.full((self.seq_len, 6), float('nan'))
@@ -297,6 +301,7 @@ class MultiTFWindowSampler:
             print(f"🎲 Drop-in Sampling有効:")
             for tf in self.timeframes:
                 print(f"   {tf}: {self.sampling_probs[tf]:.2f}")
+            print(f"   ⚠️ M1は必ず1.0固定（Cross-loss計算のため）")
         else:
             self.sampling_probs = None
             self.empty_tensor = None

@@ -219,9 +219,13 @@ class Stage1Dataset(Dataset):
                 tf_feat_norm = self.normalizer.normalize_single_tf(tf_feat, tf_name)
                 tf_targ_norm = self.normalizer.normalize_targets_single_tf(tf_targ, tf_name)
                 
-                # numpy -> torch tensor変換
-                tf_features[tf_name] = torch.tensor(tf_feat_norm, dtype=torch.float32)
-                tf_targets[tf_name] = torch.tensor(tf_targ_norm, dtype=torch.float32)
+                # numpy -> torch tensor変換 + NaN対策
+                tf_feat_tensor = torch.tensor(tf_feat_norm, dtype=torch.float32)
+                tf_targ_tensor = torch.tensor(tf_targ_norm, dtype=torch.float32)
+                
+                # 🔥 NaN伝播防止: NaN→0に変換
+                tf_features[tf_name] = torch.nan_to_num(tf_feat_tensor, nan=0.0)
+                tf_targets[tf_name] = torch.nan_to_num(tf_targ_tensor, nan=0.0)
             
             return {
                 'features': tf_features,  # Dict[tf_name, torch.Tensor]

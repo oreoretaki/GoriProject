@@ -362,6 +362,11 @@ class Stage1CombinedLoss(nn.Module):
         # クロス損失（M1データが提供された場合のみ）
         if m1_data is not None and 'm1' in pred:
             cross_loss = self._cross_loss_dict(pred, m1_data)
+        elif 'm1' in pred:
+            # 🔥 堅牢化: M1データが提供されていないが、M1予測がある場合
+            # predのM1をdetachしてm1_dataとして使用
+            m1_fallback = {'m1': pred['m1'].detach()}
+            cross_loss = self._cross_loss_dict(pred, m1_fallback)
         else:
             cross_loss = torch.tensor(0.0, device=device)
             

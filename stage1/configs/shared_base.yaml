@@ -18,7 +18,7 @@ data:
   stats_file: "stats.json"
   # 🔥 Drop-in Sampling: データ不均衡対策（短TFの重複率を下げる）
   sampling_probs:
-    m1: 0.25    # 低頻度サンプリング
+    m1: 1.00    # 🔥 M1は必ず残す（Cross-loss計算に必要）
     m5: 0.40    # 中頻度サンプリング
     m15: 0.55   # 中頻度サンプリング
     m30: 0.70   # 高頻度サンプリング
