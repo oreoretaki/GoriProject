@@ -885,12 +885,10 @@ def main():
     custom_progress = CustomProgressBar(refresh_rate=10)
     callbacks.append(custom_progress)
     
-    # T5転移学習用コールバック
+    # 🔥 T5転移学習用コールバックは廃止（T5は常に解凍状態）
+    unfreezing_callback = None  # コールバックを無効化
     if T5_CALLBACKS_AVAILABLE and config.get('transfer_learning', {}).get('use_pretrained_lm', False):
-        freeze_epochs = config.get('transfer_learning', {}).get('freeze_lm_epochs', 3)
-        unfreezing_callback = GradualUnfreezingCallback(freeze_epochs=freeze_epochs)
-        callbacks.append(unfreezing_callback)
-        print(f"🤗 T5段階的解凍コールバックを追加 (freeze_epochs={freeze_epochs})")
+        print("🔓 T5は常に解凍状態のため、解凍コールバックはスキップ")
     
     # ロガー
     try:
@@ -1140,7 +1138,7 @@ def main():
                 'max_epochs': config['training']['epochs'],
                 'devices': 1 if torch.cuda.is_available() and args.devices > 0 else 'auto',
                 'accelerator': 'gpu' if torch.cuda.is_available() and args.devices > 0 else 'cpu',
-                'callbacks': [seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress] + ([unfreezing_callback] if T5_CALLBACKS_AVAILABLE and config.get('transfer_learning', {}).get('use_pretrained_lm', False) else []),
+                'callbacks': [seed_checkpoint_callback, seed_early_stopping, lr_monitor, custom_progress],  # 🔥 unfreezing_callbackを削除
                 'logger': seed_logger,
                 'precision': config['training']['precision'],
                 'gradient_clip_val': config['training']['gradient_clip'],
