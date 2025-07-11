@@ -607,14 +607,24 @@ class MaskingStrategy(nn.Module):
                 masked_indices = torch.where(masks[b])[0]
                 excess = current_masked - target_masked
                 if excess > 0:
-                    remove_indices = masked_indices[torch.randperm(len(masked_indices), generator=self.generator)[:excess]]
+                    # 🔥 CPUでrandpermを実行してからGPUに移動
+                    cpu_generator = torch.Generator()
+                    if hasattr(self.generator, 'get_state'):
+                        cpu_generator.set_state(self.generator.get_state().cpu())
+                    perm_indices = torch.randperm(len(masked_indices), generator=cpu_generator)[:excess]
+                    remove_indices = masked_indices[perm_indices]
                     masks[b, remove_indices] = False
             elif current_masked < target_masked:
                 # 不足分をランダムに追加
                 unmasked_indices = torch.where(~masks[b])[0]
                 needed = target_masked - current_masked
                 if needed > 0 and len(unmasked_indices) > 0:
-                    add_indices = unmasked_indices[torch.randperm(len(unmasked_indices), generator=self.generator)[:needed]]
+                    # 🔥 CPUでrandpermを実行してからGPUに移動
+                    cpu_generator = torch.Generator()
+                    if hasattr(self.generator, 'get_state'):
+                        cpu_generator.set_state(self.generator.get_state().cpu())
+                    perm_indices = torch.randperm(len(unmasked_indices), generator=cpu_generator)[:needed]
+                    add_indices = unmasked_indices[perm_indices]
                     masks[b, add_indices] = True
         
         return masks
