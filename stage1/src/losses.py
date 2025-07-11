@@ -391,7 +391,7 @@ class Stage1CombinedLoss(nn.Module):
                 continue
                 
             target_tf = target[tf_name]
-            mask_tf = masks.get(tf_name, None)
+            mask_tf = masks.get(tf_name, None) if masks is not None else None
             
             # NaN値を除外（padding対応）
             valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
@@ -421,7 +421,7 @@ class Stage1CombinedLoss(nn.Module):
                 continue
                 
             target_tf = target[tf_name]
-            mask_tf = masks.get(tf_name, None)
+            mask_tf = masks.get(tf_name, None) if masks is not None else None
             
             batch_size, seq_len, n_features = pred_tf.shape
             
