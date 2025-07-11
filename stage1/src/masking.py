@@ -247,6 +247,10 @@ class MaskingStrategy(nn.Module):
         target_masked = int(seq_len * effective_mask_ratio)
         masked_count = 0
         
+        # 短いシーケンスの無限ループ防止
+        if seq_len < self.mask_span_min:
+            return mask  # 全てFalseのマスクを返す（マスクしない）
+        
         # ランダム連続ブロックでマスキング
         while masked_count < target_masked:
             # ランダムなマスクスパン長（torch乱数使用）

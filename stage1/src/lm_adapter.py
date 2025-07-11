@@ -113,27 +113,20 @@ class PatchEmbedding(nn.Module):
         """
         batch_size, seq_len, n_features = x.shape
         
-        # パッチ数を計算
-        n_patches = seq_len // self.patch_len
+        # パッチ数を計算（ceil使用で適切な数を確保）
+        n_patches = max(1, math.ceil(seq_len / self.patch_len))
+        required_len = n_patches * self.patch_len
         
-        # パッチ長がシーケンス長より長い場合の処理
-        if n_patches == 0:
-            # 最低1パッチを確保（パディングまたはトランケート）
-            n_patches = 1
-            if seq_len < self.patch_len:
-                # パディング: 不足分をゼロで埋める
-                padding_len = self.patch_len - seq_len
-                x_padded = torch.zeros(batch_size, self.patch_len, n_features, device=x.device, dtype=x.dtype)
-                x_padded[:, :seq_len, :] = x
-                x = x_padded
-                effective_len = self.patch_len
-            else:
-                effective_len = n_patches * self.patch_len
-                x = x[:, :effective_len, :]
-        else:
-            effective_len = n_patches * self.patch_len
-            # シーケンス長をパッチ境界に調整
-            x = x[:, :effective_len, :]
+        # パディングが必要かチェック
+        if seq_len < required_len:
+            pad_len = required_len - seq_len
+            # NaNパディング（右端合わせ）
+            x = F.pad(x, (0, 0, 0, pad_len), value=float('nan'))  # [batch, seq+pad, n_feat]
+        elif seq_len > required_len:
+            # 長すぎる場合は切り詰め
+            x = x[:, :required_len, :]
+        
+        effective_len = required_len
         
         # パッチ化: [batch, n_patches, patch_len, n_features]
         x = x.view(batch_size, n_patches, self.patch_len, n_features)

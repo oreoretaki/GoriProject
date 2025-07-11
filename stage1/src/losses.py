@@ -467,7 +467,7 @@ class Stage1CombinedLoss(nn.Module):
                     pred_seq = pred_signal[b, valid_positions]  # [valid_len]
                     target_seq = target_signal[b, valid_positions]  # [valid_len]
                     
-                    if len(pred_seq) < 64:  # STFT計算に必要な最小長
+                    if len(pred_seq) == 0 or len(pred_seq) < 64:  # STFT計算に必要な最小長
                         continue
                         
                     # 各スケールでSTFT損失計算

@@ -49,11 +49,13 @@ def collate_multiscale(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.
             
             for tf_name, tensors in tf_features.items():
                 # pad_sequence を使って可変長シーケンスをパディング
-                result['features'][tf_name] = torch.nn.utils.rnn.pad_sequence(
+                padded_tensor = torch.nn.utils.rnn.pad_sequence(
                     tensors, 
                     batch_first=True, 
                     padding_value=float('nan')
                 )
+                # dtype統一（AMP互換性のため）
+                result['features'][tf_name] = torch.nan_to_num(padded_tensor).to(torch.float32)
         
         # targetsを処理
         if 'targets' in sample:
@@ -64,11 +66,13 @@ def collate_multiscale(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.
             
             for tf_name, tensors in tf_targets.items():
                 # pad_sequence を使って可変長シーケンスをパディング
-                result['targets'][tf_name] = torch.nn.utils.rnn.pad_sequence(
+                padded_tensor = torch.nn.utils.rnn.pad_sequence(
                     tensors, 
                     batch_first=True, 
                     padding_value=float('nan')
                 )
+                # dtype統一（AMP互換性のため）
+                result['targets'][tf_name] = torch.nan_to_num(padded_tensor).to(torch.float32)
         
         return result
     else:
