@@ -66,7 +66,7 @@ class MaskingStrategy(nn.Module):
         # Legacy tensor format support  
         # 🔥 デバイス対応generator初期化
         device = features.device
-        if self.generator is None:
+        if self.generator is None or self.generator.device != device:
             self.generator = torch.Generator(device=device)
             
         if seed is not None:
@@ -156,7 +156,7 @@ class MaskingStrategy(nn.Module):
         """
         # 🔥 デバイス対応generator初期化
         device = next(iter(features.values())).device
-        if self.generator is None:
+        if self.generator is None or self.generator.device != device:
             self.generator = torch.Generator(device=device)
             
         if seed is not None:
@@ -537,6 +537,10 @@ class MaskingStrategy(nn.Module):
         Returns:
             masks: [batch, seq_len] bool tensor
         """
+        # 🔥 デバイス対応generator初期化
+        if self.generator is None or self.generator.device != device:
+            self.generator = torch.Generator(device=device)
+            
         # 短いシーケンスの場合はマスクなし
         if seq_len < self.mask_span_min:
             return torch.zeros(batch_size, seq_len, device=device, dtype=torch.bool)
