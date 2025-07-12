@@ -7,7 +7,7 @@ runtime:
   experiment_name: "t5_large_nofreeze"
 
 data:
-  seq_len: 128
+  seq_len: 256
   timeframes: [m1, m5, m15, m30, h1, h4]
   n_timeframes: 6
   n_features: 6
@@ -37,7 +37,7 @@ loss:
   stft_scales: [64, 128]
 
 training:
-  batch_size: 256   # H100最大活用サイズ
+  batch_size: 192   # VRAM増加対応
   accumulate_grad_batches: 1
   epochs: 7
   precision: "bf16-mixed"
@@ -50,12 +50,12 @@ training:
     min_delta: 0.001
   optimizer:
     name: AdamW
-    lr: 4.0e-3  # 線形スケーリング (192→256 で ×1.333)
+    lr: 3.0e-3  # 線形スケーリング (256→192 で ÷1.33)
     betas: [0.9, 0.98]
     weight_decay: 0.01
   scheduler:
     name: linear_with_warmup
-    max_lr: 4.0e-3  # バッチサイズ256用
+    max_lr: 3.0e-3  # バッチサイズ192用
     num_warmup_steps: 1000
     interval: "step"
     div_factor: 10.0
@@ -75,8 +75,8 @@ evaluation:
     m1: 0.25  # seq_len 128 → 32本masked
     m5: 0.15  # seq_len 26 → 4本
     m15: 0.05 # seq_len 9 → 0-1本
-    m30: 0.05 # ★ 下げる seq_len 5 → 0-1本  
-    h1: 0.20  # seq_len 3 → 1本
+    m30: 0.08 # seq_len 9本×8%≈1本
+    h1: 0.25  # seq_len 5本×25%≈1本
     h4: 0.00  # ★ 最低に seq_len 1 → 0本（常に評価可能）
 
 logging:
