@@ -397,7 +397,9 @@ class Stage1CombinedLoss(nn.Module):
     
     def _huber_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor], masks: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Dict形式のHuber損失計算"""
-        total_loss = 0.0
+        # 🔧 勾配グラフ保持: 最初からTensorで初期化
+        pred_ref = next(iter(pred.values()))
+        total_loss = pred_ref.sum() * 0.0  # requires_grad=True, value=0
         total_count = 0
         
         for tf_name, pred_tf in pred.items():
@@ -441,7 +443,10 @@ class Stage1CombinedLoss(nn.Module):
             total_loss += loss
             total_count += 1
             
-        return total_loss / max(total_count, 1)
+        # 🔧 0件でもTensorを返す
+        if total_count == 0:
+            return pred_ref.sum() * 0.0  # requires_grad=True, value=0
+        return total_loss / total_count
     
     def _stft_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor], masks: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Dict形式のSTFT損失計算（長さマスク対応 Ultra-Vectorized版）"""
@@ -495,7 +500,9 @@ class Stage1CombinedLoss(nn.Module):
         for i, orig_len in enumerate(original_lengths):
             length_mask[i, :orig_len] = True
         
-        total_loss = 0.0
+        # 🔧 勾配グラフ保持: 最初からTensorで初期化
+        pred_ref = pred_batch if len(pred_batch) > 0 else next(iter(pred.values()))
+        total_loss = pred_ref.sum() * 0.0  # requires_grad=True, value=0
         n_valid_scales = 0
         
         # 4) 🔥 各スケールで一括STFT計算 + 長さマスク適用
@@ -560,12 +567,16 @@ class Stage1CombinedLoss(nn.Module):
             
             total_loss += mag_loss + 0.1 * phase_loss
         
-        # 正規化
-        return total_loss / max(n_valid_scales, 1)
+        # 🔧 0件でもTensorを返す
+        if n_valid_scales == 0:
+            return pred_ref.sum() * 0.0  # requires_grad=True, value=0
+        return total_loss / n_valid_scales
     
     def _amp_phase_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Dict形式の振幅位相損失計算"""
-        total_loss = 0.0
+        # 🔧 勾配グラフ保持: 最初からTensorで初期化
+        pred_ref = next(iter(pred.values()))
+        total_loss = pred_ref.sum() * 0.0  # requires_grad=True, value=0
         total_count = 0
         
         for tf_name, pred_tf in pred.items():
@@ -615,7 +626,10 @@ class Stage1CombinedLoss(nn.Module):
                     total_loss += amp_corr + phase_corr
                     total_count += 1
                     
-        return total_loss / max(total_count, 1)
+        # 🔧 0件でもTensorを返す
+        if total_count == 0:
+            return pred_ref.sum() * 0.0  # requires_grad=True, value=0
+        return total_loss / total_count
     
     def _cross_loss_dict(self, pred: Dict[str, torch.Tensor], m1_data: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Dict形式のクロス整合性損失計算"""
@@ -625,7 +639,8 @@ class Stage1CombinedLoss(nn.Module):
         pred_m1 = pred['m1']  # [batch, seq_len, 4]
         m1_ref = m1_data['m1']  # [batch, seq_len, 4]
         
-        total_loss = 0.0
+        # 🔧 勾配グラフ保持: 最初からTensorで初期化
+        total_loss = pred_m1.sum() * 0.0  # requires_grad=True, value=0
         total_count = 0
         
         # M1以外のTFについて、対応するM1集約と比較
@@ -665,7 +680,10 @@ class Stage1CombinedLoss(nn.Module):
             total_loss += tf_loss
             total_count += 1
             
-        return total_loss / max(total_count, 1)
+        # 🔧 0件でもTensorを返す
+        if total_count == 0:
+            return pred_m1.sum() * 0.0  # requires_grad=True, value=0
+        return total_loss / total_count
     
     def _aggregate_m1_to_tf_dict(self, m1_data: torch.Tensor, interval: int, target_len: int) -> torch.Tensor:
         """
