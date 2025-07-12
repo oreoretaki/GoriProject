@@ -685,12 +685,16 @@ class Stage1CombinedLoss(nn.Module):
     @staticmethod
     def _aggregate_m1_to_tf_static(m1_data: torch.Tensor, interval: int, target_len: int) -> torch.Tensor:
         """
-        M1データを指定間隔で集約（完全ベクトル化static版）
+        M1データを指定間隔で集約（堅牢化版）
         """
         batch_size, seq_len, _ = m1_data.shape
         
+        # 🛡️ 入力検証
+        if target_len <= 0 or seq_len <= 0:
+            return torch.zeros(batch_size, max(1, target_len), 4, device=m1_data.device)
+        
         # 簡易集約（実際にはより精密な実装が必要）
-        if interval >= seq_len:
+        if interval >= seq_len or target_len == 1:
             # 全期間集約
             open_val = m1_data[:, 0, 0:1]  # 最初の始値
             high_val = m1_data[:, :, 1].max(dim=1, keepdim=True)[0]  # 最高値
@@ -700,22 +704,47 @@ class Stage1CombinedLoss(nn.Module):
             aggregated_bar = torch.cat([open_val, high_val, low_val, close_val], dim=1)
             return aggregated_bar.unsqueeze(1).expand(-1, target_len, -1)
         else:
-            # 🔥 完全ベクトル化区間集約（Pythonループ除去）
+            # 🔥 堅牢化された区間集約
             n_chunks = target_len
-            chunk_size = seq_len // n_chunks
+            chunk_size = max(1, seq_len // n_chunks)  # 🛡️ 最小1を保証
             
-            # パディングしてchunk_sizeで割り切れるようにする
-            padded_len = n_chunks * chunk_size
-            if padded_len < seq_len:
-                # 必要に応じて末尾を切り詰め
-                m1_data = m1_data[:, :padded_len]
-            elif padded_len > seq_len:
-                # パディング（最後の値で埋める）
-                last_vals = m1_data[:, -1:].expand(-1, padded_len - seq_len, -1)
-                m1_data = torch.cat([m1_data, last_vals], dim=1)
+            # 🛡️ 実際に処理可能な長さを計算
+            effective_len = min(seq_len, n_chunks * chunk_size)
             
-            # 🔥 [batch, seq_len, 4] -> [batch, n_chunks, chunk_size, 4]
-            reshaped = m1_data.view(batch_size, n_chunks, chunk_size, 4)
+            # データを有効長にトリム
+            m1_trimmed = m1_data[:, :effective_len]
+            
+            # 🛡️ Reshape前のサイズ検証
+            if effective_len != n_chunks * chunk_size:
+                # パディングで調整
+                pad_len = n_chunks * chunk_size - effective_len
+                last_val = m1_trimmed[:, -1:] if effective_len > 0 else torch.zeros(batch_size, 1, 4, device=m1_data.device)
+                padding = last_val.expand(-1, pad_len, -1)
+                m1_trimmed = torch.cat([m1_trimmed, padding], dim=1)
+            
+            # 🔥 Safe reshape
+            try:
+                reshaped = m1_trimmed.view(batch_size, n_chunks, chunk_size, 4)
+            except RuntimeError:
+                # 🛡️ Fallback: 手動チャンク分割
+                chunks = []
+                for i in range(n_chunks):
+                    start_idx = i * chunk_size
+                    end_idx = min(start_idx + chunk_size, seq_len)
+                    
+                    if start_idx < seq_len:
+                        chunk_data = m1_data[:, start_idx:end_idx]
+                        # 不足分をパディング
+                        if chunk_data.shape[1] < chunk_size:
+                            pad_size = chunk_size - chunk_data.shape[1]
+                            last_val = chunk_data[:, -1:] if chunk_data.shape[1] > 0 else torch.zeros(batch_size, 1, 4, device=m1_data.device)
+                            chunk_data = torch.cat([chunk_data, last_val.expand(-1, pad_size, -1)], dim=1)
+                        chunks.append(chunk_data)
+                    else:
+                        # 空チャンクをゼロで埋める
+                        chunks.append(torch.zeros(batch_size, chunk_size, 4, device=m1_data.device))
+                
+                reshaped = torch.stack(chunks, dim=1)  # [batch, n_chunks, chunk_size, 4]
             
             # 🔥 一括OHLC集約（torch.amax/amin使用）
             open_val = reshaped[:, :, 0, 0]   # [batch, n_chunks] - 各チャンクの最初の始値
