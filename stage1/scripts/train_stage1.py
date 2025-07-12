@@ -736,13 +736,15 @@ class Stage1LightningModule(pl.LightningModule):
         
         # Linear Warmup + Cosine Decay スケジューラーの実装
         if scheduler_config['name'].lower() == 'linear_with_warmup':
+            # 共通計算
+            steps_per_epoch = total_steps // self.config['training']['epochs']
+            
             # Warmup設定の計算（num_warmup_steps優先、warmup_epochs=nullの場合）
             warmup_epochs = self.config['training'].get('warmup_epochs', 0)
             if warmup_epochs is None:
                 # num_warmup_stepsを直接使用
                 num_warmup_steps = scheduler_config.get('num_warmup_steps', 1000)
             else:
-                steps_per_epoch = total_steps // self.config['training']['epochs']
                 num_warmup_steps = steps_per_epoch * warmup_epochs
             
             print(f"📐 Linear Warmup スケジューラー設定:")
