@@ -6,6 +6,7 @@ SingleTFWindowSampler + MultiTFWindowSampler（ラッパー）
 
 import pandas as pd
 import numpy as np
+import math
 from typing import Dict, List, Tuple, Optional
 import warnings
 from scipy.ndimage import convolve1d
@@ -58,7 +59,7 @@ class SingleTFWindowSampler:
         # M1基準seq_lenをこのTFに合わせて変換
         # M1=128なら、M5=128/5=25.6→26, H1=128/60=2.13→3
         m1_duration_minutes = seq_len * 1  # M1は1分間隔
-        self.seq_len = max(1, int(m1_duration_minutes / self.tf_step_minutes))
+        self.seq_len = max(1, math.ceil(m1_duration_minutes / self.tf_step_minutes))
         
         # 🔥 stdout削減: 詳細出力を最小化
         if tf_name == 'm1':  # M1の場合のみ出力
