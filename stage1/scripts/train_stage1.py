@@ -313,8 +313,11 @@ class Stage1LightningModule(pl.LightningModule):
             # 🔥 CRITICAL FIX: targets→featuresから正しくm1データを取得
             m1_data = features.get('m1') if isinstance(features, dict) else None
             
-            # 🔧 AsyncモードでもDrop-inマスク生成（ベクトル化版）
-            if eval_mask_ratio is not None and isinstance(features, dict):
+            # 🔧 AsyncモードでもDrop-inマスク生成（ベクトル化版）- 必ず生成
+            if isinstance(features, dict):
+                if eval_mask_ratio is None:
+                    # eval_mask_ratioがNoneの場合、デフォルトのmask_ratioを使用
+                    eval_mask_ratio = self.config['masking']['mask_ratio']
                 eval_masks = self._make_eval_masks(features, eval_mask_ratio, batch_idx)
             else:
                 eval_masks = None
@@ -501,15 +504,16 @@ class Stage1LightningModule(pl.LightningModule):
                 
             target_tf = target[tf_name]
             
-            # 🔧 マスク除外: NaN + drop-in mask両方を考慮
+            # 🔧 マスク除外: NaN + 0パディング + drop-in mask全てを考慮
             nan_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len] - NaN除外
+            padding_mask = ~(pred_tf.abs().sum(-1) == 0)  # [batch, seq_len] - 0パディング除外
             
             if masks is not None and tf_name in masks:
                 # drop-inマスク（True=隠された位置）を除外
                 dropout_mask = ~masks[tf_name]  # [batch, seq_len] - マスク位置除外
-                valid_mask = nan_mask & dropout_mask
+                valid_mask = nan_mask & padding_mask & dropout_mask
             else:
-                valid_mask = nan_mask
+                valid_mask = nan_mask & padding_mask
             
             if valid_mask.sum() > 0:
                 # 有効な位置のみで相関計算
