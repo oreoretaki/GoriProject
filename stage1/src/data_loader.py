@@ -142,6 +142,14 @@ class Stage1Dataset(Dataset):
         # ウィンドウサンプリング（ベクトル化+キャッシュ）
         cache_dir = self.data_dir / "cache"
         async_sampler = config.get('model', {}).get('async_sampler', False)
+        
+        # 🔥 検証時は専用sampling_probsを使用（Drop-in完全無効化）
+        if split == "val" and 'sampling_probs_val' in config['data']:
+            sampling_probs = config['data']['sampling_probs_val']
+            print("   🔧 検証用sampling_probs適用（Drop-in無効化）")
+        else:
+            sampling_probs = config['data'].get('sampling_probs')
+        
         self.window_sampler = MultiTFWindowSampler(
             tf_data=self.tf_data,
             seq_len=config['data']['seq_len'],
@@ -151,7 +159,7 @@ class Stage1Dataset(Dataset):
             cache_dir=str(cache_dir),
             val_gap_days=config['validation'].get('val_gap_days', 1.0),
             async_sampler=async_sampler,
-            sampling_probs=config['data'].get('sampling_probs')  # 🔥 Drop-in Sampling
+            sampling_probs=sampling_probs  # 🔥 split別Drop-in Sampling
         )
         
         # 注意：マスキングはモデル内で実行（data_loader側では生データを返す）

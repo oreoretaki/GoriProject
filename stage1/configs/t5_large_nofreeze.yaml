@@ -15,6 +15,7 @@ data:
   data_dir: "../data/derived"
   stats_file: "stats.json"
   sampling_probs: {m1: 1.00, m5: 1.00, m15: 0.55, m30: 0.70, h1: 0.85, h4: 1.00}
+  sampling_probs_val: {m1: 1.00, m5: 1.00, m15: 1.00, m30: 1.00, h1: 1.00, h4: 1.00}
 
 dataloader:
   num_workers: 32
