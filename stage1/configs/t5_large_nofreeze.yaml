@@ -37,7 +37,7 @@ loss:
   stft_scales: [64, 128]
 
 training:
-  batch_size: 256  # H100最大活用サイズ
+  batch_size: 256   # H100最大活用サイズ
   accumulate_grad_batches: 1
   epochs: 7
   precision: "bf16-mixed"
@@ -63,18 +63,21 @@ training:
     pct_start: 0.10
 
 development:
-  limit_train_batches: null   # フル訓練（制限なし）
+  limit_train_batches: 2000   # 2000ステップでテスト
   limit_val_batches: null     # フル検証（制限なし）
 
 evaluation:
+  # 全体のデフォルト
   eval_mask_ratio: 0.15
+  
+  # TF ごとの上書き
   tf_specific_mask_ratios:
-    m1: 0.25
+    m1: 0.25  # 細粒度は難しいので高め
     m5: 0.15
-    m15: 0.15
-    m30: 0.15
-    h1: 0.15
-    h4: 0.15
+    m15: 0.05 # シーケンスが短いので低く
+    m30: 0.22 # 標準より少し高め
+    h1: 0.28  # ★ 上げる
+    h4: 0.32  # ★ 上げる
 
 logging:
   log_every_n_steps: 200
