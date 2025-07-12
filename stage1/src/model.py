@@ -557,14 +557,6 @@ class Stage1Model(nn.Module):
         for tf, z in encoded.items():
             # Async mode用の修正されたBottleneck処理
             # z: [B, L, d_model] → mean-pooling → [B, d_model] → MLP → [B, latent_len, d_model]
-            
-            valid_mask = ~padding_masks[tf]  # [B, L]
-            if valid_mask.sum() > 0:
-                # Mean pooling over valid positions
-                z_pool = (z * valid_mask.unsqueeze(-1)).sum(dim=1) / valid_mask.sum(dim=1, keepdim=True)  # [B, d_model]
-            else:
-                z_pool = z.mean(dim=1)  # Fallback to regular mean
-            
             # 🔧 修正: AsyncモードではTF別簡易圧縮を使用
             batch_size, seq_len, d_model = z.shape
             

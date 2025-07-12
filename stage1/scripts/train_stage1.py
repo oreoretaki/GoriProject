@@ -319,8 +319,8 @@ class Stage1LightningModule(pl.LightningModule):
             else:
                 eval_masks = None
             
-            # 損失計算（Dict版）- マスクなしで計算
-            losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
+            # 損失計算（Dict版）- マスクありで計算
+            losses = self.criterion(outputs, targets, masks=eval_masks, m1_data={'m1': m1_data} if m1_data is not None else None)
         else:
             # Legacy: tensor形式
             if eval_mask_ratio is not None:
@@ -554,8 +554,8 @@ class Stage1LightningModule(pl.LightningModule):
         """AsyncモードでのTF別eval_mask生成（ベクトル化版）"""
         eval_masks = {}
         
-        # 🔥 ベクトル化：Generator使用で再現性確保
-        device = next(self.parameters()).device
+        # 🔥 安全なデバイス取得：featuresから取得
+        device = next(iter(features.values())).device
         g = torch.Generator(device=device)
         g.manual_seed(42 + batch_idx)  # シード固定で再現性
         
