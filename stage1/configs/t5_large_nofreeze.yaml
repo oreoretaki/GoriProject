@@ -69,7 +69,7 @@ model:
 
 # 訓練設定（T5-Large安定化）
 training:
-  batch_size: 32                  # 🔥 OOM対策: 緊急削減（768→32）
+  batch_size: 192                 # H100-80GBで安全に収まる最大付近
   epochs: 7                       # 7エポック設定
   learning_rate: 1e-3
   weight_decay: 1e-4
@@ -84,7 +84,7 @@ training:
   # 統一されたオプティマイザー設定
   optimizer:
     name: "AdamW"
-    lr: 1.5e-3                        # ヘッド & Adapter 用の基準 LR（LR Finder v4推奨値 - バッチサイズ1024用）
+    lr: 3.0e-3                        # 線形スケーリング対応 (batch_size 192用)
     betas: [0.9, 0.98]
     weight_decay: 0.01
     
@@ -95,12 +95,12 @@ training:
   # 統一されたLRスケジューラー設定
   scheduler:
     name: "linear_with_warmup"  # Linear Warmup + Cosine Decay
-    max_lr: 1.5e-3              # 最大学習率（LR Finder v4推奨値 - バッチサイズ1024用）
+    max_lr: 3.0e-3              # 最大学習率 (batch_size 192用)
     div_factor: 10.0            # OneCycleLR用（互換性保持）
     final_div_factor: 50
     pct_start: 0.10             
     interval: "step"            # ステップ単位で更新
-    num_warmup_steps: 3500      # 全体ステップの~5% (1時間でwarmup完了)
+    num_warmup_steps: 1000      # 1万バッチテストの約10%
 
 # データ拡張（無効化）
 augmentation:
@@ -179,8 +179,8 @@ loss:
 
 # 開発用設定（制限解除）
 development:
-  limit_train_batches: null       # 制限解除 - 全データセット使用
-  limit_val_batches: null          # 制限解除 - 全データセット使用
+  limit_train_batches: 10000      # ≈ 18分 (7 it/s想定)
+  limit_val_batches: 2000          # 適切な検証サイズ
 
 # LR Finder設定
 lr_finder:
