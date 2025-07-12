@@ -1,0 +1,93 @@
+# ---------------------------------
+# Stage-1 quick sanity run (H100)
+# ---------------------------------
+
+runtime:
+  seed: 42
+  experiment_name: "stage1_batch192_test"
+
+data:
+  seq_len: 128
+  timeframes: [m1, m5, m15, m30, h1, h4]
+  n_timeframes: 6
+  n_features: 6
+  sampling_probs: {m1: 1.00, m5: 0.40, m15: 0.55, m30: 0.70, h1: 0.85, h4: 1.00}
+
+dataloader:
+  num_workers: 32
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+
+masking:
+  mask_ratio: 0.15
+  mask_span_min: 3
+  mask_span_max: 10
+  sync_across_tf: false
+  use_vectorized: true
+
+loss:
+  weights: {recon_tf: 0.6, spec_tf: 0.0, cross: 0.02, amp_phase: 0.0}
+  huber_delta: 1.0
+  stft_scales: [64, 128]
+
+training:
+  batch_size: 192  # 80 GB H100 で安全
+  accumulate_grad_batches: 1
+  epochs: 7
+  precision: "bf16-mixed"
+  gradient_clip: 0.012
+  optimizer:
+    name: AdamW
+    lr: 3.0e-3  # 線形スケーリング (32→192 で ×6)
+    betas: [0.9, 0.98]
+    weight_decay: 0.01
+  scheduler:
+    name: linear_with_warmup
+    max_lr: 3.0e-3
+    num_warmup_steps: 1000
+    interval: "step"
+
+development:
+  limit_train_batches: 10000  # ≒ 1 時間
+  limit_val_batches: 2000
+
+evaluation:
+  eval_mask_ratio: 0.0
+  tf_specific_mask_ratios:
+    m1: 0.25
+    m5: 0.15
+    m15: 0.15
+    m30: 0.15
+    h1: 0.15
+    h4: 0.15
+
+logging:
+  log_every_n_steps: 200
+  checkpoint_every_n_epochs: 1
+  save_top_k: 2
+  monitor: "val_correlation_mean"
+  progress_bar_refresh_rate: 5
+
+transfer_learning:
+  use_pretrained_lm: true
+  lm_name_or_path: "t5-large"
+  freeze_lm_epochs: 0
+  patch_len: 8
+  lm_learning_rate_factor: 0.01
+
+model:
+  async_sampler: true
+  tf_stem: {kernel_size: 3, d_model: 1024}
+  encoder: {n_layers: 4, d_model: 1024, cross_attn_every: 2}
+  bottleneck: {latent_len: 16, stride: 8}
+  decoder: {n_layers: 2, kernel_size: 3}
+  positional: {intra_tf: rotary, inter_tf: learned}
+
+validation:
+  val_split: 0.2
+  val_gap_days: 60.0
+
+normalization:
+  method: zscore
+  per_tf: true
