@@ -169,6 +169,17 @@ class Stage1LightningModule(pl.LightningModule):
         features = batch['features']
         targets = batch['targets']
         
+        # 🔧 seq_len整合性チェック（初回のみ）
+        if batch_idx == 0:
+            config_seq_len = self.config['data']['seq_len']
+            if isinstance(features, dict):
+                actual_seq_len = features['m1'].shape[1]  # [batch, seq_len, features]
+            else:
+                actual_seq_len = features.shape[2]  # [batch, n_tf, seq_len, features]
+            
+            if config_seq_len != actual_seq_len:
+                raise ValueError(f"seq_len不整合: config={config_seq_len}, actual={actual_seq_len}. キャッシュクリア要!")
+        
         # Dict形式対応: async_samplerモードかを判定
         async_sampler = self.config.get('model', {}).get('async_sampler', False)
         

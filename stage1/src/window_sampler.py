@@ -84,7 +84,7 @@ class SingleTFWindowSampler:
             
         # キャッシュファイル名（TF固有）
         data_hash = hashlib.md5(str(self.tf_data.index[[0, -1]]).encode()).hexdigest()[:8]
-        cache_file = self.cache_dir / f"windows_{data_hash}_{self.tf_name}.npy"
+        cache_file = self.cache_dir / f"windows_{data_hash}_{self.tf_name}_seq{self.seq_len}.npy"
         
         if cache_file.exists():
             print(f"   📂 キャッシュから読み込み: {cache_file.name}")

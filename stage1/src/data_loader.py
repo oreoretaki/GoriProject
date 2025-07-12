@@ -140,7 +140,8 @@ class Stage1Dataset(Dataset):
             self.normalizer.fit(self.tf_data)
         
         # ウィンドウサンプリング（ベクトル化+キャッシュ）
-        cache_dir = self.data_dir / "cache"
+        seq_len = config['data']['seq_len']
+        cache_dir = self.data_dir / f"cache_seq{seq_len}"  # seq_len別キャッシュ分離
         async_sampler = config.get('model', {}).get('async_sampler', False)
         
         # 🔥 検証時は専用sampling_probsを使用（Drop-in完全無効化）

@@ -111,7 +111,7 @@ model:
     cross_attn_every: 2
     flash_attn: true
   bottleneck: 
-    latent_len: 16
+    latent_len: 32  # seq_len 256 / stride 8 = 32
     stride: 8
   decoder: 
     n_layers: 2
