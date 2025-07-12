@@ -78,7 +78,7 @@ evaluation:
 logging:
   log_every_n_steps: 200
   checkpoint_every_n_epochs: 1
-  save_top_k: 2
+  save_top_k: 1                # 最良1個のみ保存（容量節約）
   monitor: "val_correlation_mean"
   progress_bar_refresh_rate: 5
 
