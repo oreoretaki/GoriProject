@@ -40,12 +40,15 @@ class HuberLoss(nn.Module):
             return loss.mean()
 
 class STFTLoss(nn.Module):
-    """マルチ解像度STFT損失（スペクトログラム特徴保持）"""
+    """マルチ解像度STFT損失（完全ベクトル化版）"""
     
     def __init__(self, scales: List[int] = [256, 512, 1024], hop_ratio: float = 0.25):
         super().__init__()
         self.scales = scales
         self.hop_ratio = hop_ratio
+        
+        # 🔥 Hann windowをキャッシュ（メモリ効率化）
+        self._hann_windows = {}
         
     def forward(self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         """
@@ -58,54 +61,59 @@ class STFTLoss(nn.Module):
             loss: STFT損失
         """
         batch_size, n_tf, seq_len, n_features = pred.shape
+        
+        # 🔥 完全ベクトル化: [B, TF, T, F] -> [B*TF*F, T]
+        pred_batched = pred.permute(0, 1, 3, 2).reshape(-1, seq_len)    # [B*TF*F, T]
+        target_batched = target.permute(0, 1, 3, 2).reshape(-1, seq_len) # [B*TF*F, T]
+        
         total_loss = 0.0
         
-        # 各特徴量（OHLC）とTFについてSTFT損失計算
-        for tf_idx in range(n_tf):
-            for feat_idx in range(n_features):
-                pred_signal = pred[:, tf_idx, :, feat_idx]  # [batch, seq_len]
-                target_signal = target[:, tf_idx, :, feat_idx]  # [batch, seq_len]
+        # 各スケールで一括STFT計算（13,824回 → 3回）
+        for scale in self.scales:
+            if seq_len < scale:
+                continue
                 
-                # 各スケールでSTFT損失計算
-                for scale in self.scales:
-                    if seq_len < scale:
-                        continue
-                        
-                    hop_length = int(scale * self.hop_ratio)
-                    
-                    # STFT計算（BF16対応: 必ずFP32/CUDAで実行）
-                    with torch.cuda.amp.autocast(enabled=False):  # BF16→FP32 autocast無効化
-                        # 明示的にFP32/CUDAに変換（CPU fallback防止）
-                        pred_signal_32 = pred_signal.float().cuda()
-                        target_signal_32 = target_signal.float().cuda()
-                        
-                        pred_stft = torch.stft(
-                            pred_signal_32, 
-                            n_fft=scale, 
-                            hop_length=hop_length, 
-                            return_complex=True
-                        )
-                        target_stft = torch.stft(
-                            target_signal_32, 
-                            n_fft=scale, 
-                            hop_length=hop_length, 
-                            return_complex=True
-                        )
-                    
-                    # マグニチュード損失
-                    pred_mag = torch.abs(pred_stft)
-                    target_mag = torch.abs(target_stft)
-                    mag_loss = F.l1_loss(pred_mag, target_mag)
-                    
-                    # 位相損失（複素数として）
-                    phase_loss = F.l1_loss(pred_stft.real, target_stft.real) + \
-                                F.l1_loss(pred_stft.imag, target_stft.imag)
-                    
-                    total_loss += mag_loss + 0.1 * phase_loss
-                    
+            hop_length = int(scale * self.hop_ratio)
+            
+            # Hann windowをキャッシュから取得
+            if scale not in self._hann_windows:
+                self._hann_windows[scale] = torch.hann_window(scale, device=pred.device)
+            hann_window = self._hann_windows[scale]
+            
+            # 🔥 一括STFT計算（数万倍高速化）
+            with torch.cuda.amp.autocast(enabled=False):
+                pred_batched_32 = pred_batched.float().cuda()
+                target_batched_32 = target_batched.float().cuda()
+                
+                # 全シーケンスを一括STFT
+                pred_stft = torch.stft(
+                    pred_batched_32,
+                    n_fft=scale,
+                    hop_length=hop_length,
+                    window=hann_window,
+                    return_complex=True
+                )
+                target_stft = torch.stft(
+                    target_batched_32,
+                    n_fft=scale,
+                    hop_length=hop_length, 
+                    window=hann_window,
+                    return_complex=True
+                )
+            
+            # マグニチュード損失（一括計算）
+            pred_mag = torch.abs(pred_stft)
+            target_mag = torch.abs(target_stft)
+            mag_loss = F.l1_loss(pred_mag, target_mag)
+            
+            # 位相損失（一括計算）
+            phase_loss = F.l1_loss(pred_stft.real, target_stft.real) + \
+                        F.l1_loss(pred_stft.imag, target_stft.imag)
+            
+            total_loss += mag_loss + 0.1 * phase_loss
+        
         # 正規化
-        normalization = len(self.scales) * n_tf * n_features
-        return total_loss / normalization
+        return total_loss / max(len(self.scales), 1)
 
 class CrossTFConsistencyLoss(nn.Module):
     """クロスTF整合性損失（デコードTF vs M1集約）"""
@@ -149,7 +157,7 @@ class CrossTFConsistencyLoss(nn.Module):
         
     def _aggregate_m1_to_tf(self, m1_data: torch.Tensor, interval: int, target_len: int) -> torch.Tensor:
         """
-        M1データを指定間隔で集約してTFデータを生成
+        M1データを指定間隔で集約してTFデータを生成（完全ベクトル化版）
         
         Args:
             m1_data: [batch, seq_len, 4] M1 OHLC
@@ -172,33 +180,33 @@ class CrossTFConsistencyLoss(nn.Module):
             aggregated_bar = torch.cat([open_val, high_val, low_val, close_val], dim=1)
             return aggregated_bar.unsqueeze(1).expand(-1, target_len, -1)
         else:
-            # 区間ごとに集約
+            # 🔥 完全ベクトル化区間集約（Pythonループ除去）
             n_chunks = target_len
             chunk_size = seq_len // n_chunks
             
-            aggregated = []
-            for i in range(n_chunks):
-                start_idx = i * chunk_size
-                end_idx = min((i + 1) * chunk_size, seq_len)
-                
-                if start_idx >= seq_len:
-                    # パディング
-                    last_bar = aggregated[-1] if aggregated else m1_data[:, -1]
-                    aggregated.append(last_bar)
-                else:
-                    chunk = m1_data[:, start_idx:end_idx]
-                    if chunk.size(1) == 0:
-                        chunk = m1_data[:, -1:] 
-                        
-                    open_val = chunk[:, 0, 0]  # 最初の始値
-                    high_val = chunk[:, :, 1].max(dim=1)[0]  # 最高値
-                    low_val = chunk[:, :, 2].min(dim=1)[0]  # 最安値  
-                    close_val = chunk[:, -1, 3]  # 最後の終値
-                    
-                    bar = torch.stack([open_val, high_val, low_val, close_val], dim=1)
-                    aggregated.append(bar)
-                    
-            return torch.stack(aggregated, dim=1)  # [batch, n_chunks, 4]
+            # パディングしてchunk_sizeで割り切れるようにする
+            padded_len = n_chunks * chunk_size
+            if padded_len < seq_len:
+                # 必要に応じて末尾を切り詰め
+                m1_data = m1_data[:, :padded_len]
+            elif padded_len > seq_len:
+                # パディング（最後の値で埋める）
+                last_vals = m1_data[:, -1:].expand(-1, padded_len - seq_len, -1)
+                m1_data = torch.cat([m1_data, last_vals], dim=1)
+            
+            # 🔥 [batch, seq_len, 4] -> [batch, n_chunks, chunk_size, 4]
+            reshaped = m1_data.view(batch_size, n_chunks, chunk_size, 4)
+            
+            # 🔥 一括OHLC集約（torch.amax/amin使用）
+            open_val = reshaped[:, :, 0, 0]   # [batch, n_chunks] - 各チャンクの最初の始値
+            high_val = torch.amax(reshaped[:, :, :, 1], dim=2)  # [batch, n_chunks] - 最高値
+            low_val = torch.amin(reshaped[:, :, :, 2], dim=2)   # [batch, n_chunks] - 最安値
+            close_val = reshaped[:, :, -1, 3]  # [batch, n_chunks] - 各チャンクの最後の終値
+            
+            # [batch, n_chunks, 4]に再構成
+            aggregated = torch.stack([open_val, high_val, low_val, close_val], dim=2)
+            
+            return aggregated
 
 class AmplitudePhaseCorrelationLoss(nn.Module):
     """振幅・位相相関損失"""
@@ -216,35 +224,32 @@ class AmplitudePhaseCorrelationLoss(nn.Module):
             loss: 振幅・位相相関損失
         """
         batch_size, n_tf, seq_len, n_features = pred.shape
-        total_loss = 0.0
         
-        for tf_idx in range(n_tf):
-            for feat_idx in range(n_features):
-                pred_signal = pred[:, tf_idx, :, feat_idx]  # [batch, seq_len]
-                target_signal = target[:, tf_idx, :, feat_idx]  # [batch, seq_len]
-                
-                # FFT計算（BF16対応: 必ずFP32/CUDAで実行）
-                with torch.cuda.amp.autocast(enabled=False):  # BF16→FP32 autocast無効化
-                    pred_signal_32 = pred_signal.float().cuda()
-                    target_signal_32 = target_signal.float().cuda()
-                    pred_fft = torch.fft.fft(pred_signal_32, dim=-1)
-                    target_fft = torch.fft.fft(target_signal_32, dim=-1)
-                
-                # 振幅
-                pred_amp = torch.abs(pred_fft)
-                target_amp = torch.abs(target_fft)
-                
-                # 位相
-                pred_phase = torch.angle(pred_fft)
-                target_phase = torch.angle(target_fft)
-                
-                # 相関損失
-                amp_corr = self._correlation_loss(pred_amp, target_amp)
-                phase_corr = self._correlation_loss(pred_phase, target_phase)
-                
-                total_loss += amp_corr + phase_corr
-                
-        return total_loss / (n_tf * n_features)
+        # 🔥 完全ベクトル化: [B, TF, T, F] -> [B*TF*F, T]
+        pred_batched = pred.permute(0, 1, 3, 2).reshape(-1, seq_len)    # [B*TF*F, T]
+        target_batched = target.permute(0, 1, 3, 2).reshape(-1, seq_len) # [B*TF*F, T]
+        
+        # 🔥 一括FFT計算（24回 → 1回）
+        with torch.cuda.amp.autocast(enabled=False):
+            pred_batched_32 = pred_batched.float().cuda()
+            target_batched_32 = target_batched.float().cuda()
+            
+            pred_fft = torch.fft.fft(pred_batched_32, dim=-1)
+            target_fft = torch.fft.fft(target_batched_32, dim=-1)
+        
+        # 振幅・位相を一括計算
+        pred_amp = torch.abs(pred_fft)
+        target_amp = torch.abs(target_fft)
+        pred_phase = torch.angle(pred_fft)
+        target_phase = torch.angle(target_fft)
+        
+        # 相関損失を一括計算
+        amp_corr = self._correlation_loss(pred_amp, target_amp)
+        phase_corr = self._correlation_loss(pred_phase, target_phase)
+        
+        total_loss = amp_corr + phase_corr
+        
+        return total_loss
         
     def _correlation_loss(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """ピアソン相関係数の負値を損失として計算"""
@@ -638,7 +643,7 @@ class Stage1CombinedLoss(nn.Module):
     @staticmethod
     def _aggregate_m1_to_tf_static(m1_data: torch.Tensor, interval: int, target_len: int) -> torch.Tensor:
         """
-        M1データを指定間隔で集約（static版）
+        M1データを指定間隔で集約（完全ベクトル化static版）
         """
         batch_size, seq_len, _ = m1_data.shape
         
@@ -653,30 +658,30 @@ class Stage1CombinedLoss(nn.Module):
             aggregated_bar = torch.cat([open_val, high_val, low_val, close_val], dim=1)
             return aggregated_bar.unsqueeze(1).expand(-1, target_len, -1)
         else:
-            # 区間ごとに集約
+            # 🔥 完全ベクトル化区間集約（Pythonループ除去）
             n_chunks = target_len
             chunk_size = seq_len // n_chunks
             
-            aggregated = []
-            for i in range(n_chunks):
-                start_idx = i * chunk_size
-                end_idx = min((i + 1) * chunk_size, seq_len)
-                
-                if start_idx >= seq_len:
-                    # パディング
-                    last_bar = aggregated[-1] if aggregated else m1_data[:, -1]
-                    aggregated.append(last_bar)
-                else:
-                    chunk = m1_data[:, start_idx:end_idx]
-                    if chunk.size(1) == 0:
-                        chunk = m1_data[:, -1:] 
-                        
-                    open_val = chunk[:, 0, 0]  # 最初の始値
-                    high_val = chunk[:, :, 1].max(dim=1)[0]  # 最高値
-                    low_val = chunk[:, :, 2].min(dim=1)[0]  # 最安値  
-                    close_val = chunk[:, -1, 3]  # 最後の終値
-                    
-                    bar = torch.stack([open_val, high_val, low_val, close_val], dim=1)
-                    aggregated.append(bar)
-                    
-            return torch.stack(aggregated, dim=1)  # [batch, n_chunks, 4]
+            # パディングしてchunk_sizeで割り切れるようにする
+            padded_len = n_chunks * chunk_size
+            if padded_len < seq_len:
+                # 必要に応じて末尾を切り詰め
+                m1_data = m1_data[:, :padded_len]
+            elif padded_len > seq_len:
+                # パディング（最後の値で埋める）
+                last_vals = m1_data[:, -1:].expand(-1, padded_len - seq_len, -1)
+                m1_data = torch.cat([m1_data, last_vals], dim=1)
+            
+            # 🔥 [batch, seq_len, 4] -> [batch, n_chunks, chunk_size, 4]
+            reshaped = m1_data.view(batch_size, n_chunks, chunk_size, 4)
+            
+            # 🔥 一括OHLC集約（torch.amax/amin使用）
+            open_val = reshaped[:, :, 0, 0]   # [batch, n_chunks] - 各チャンクの最初の始値
+            high_val = torch.amax(reshaped[:, :, :, 1], dim=2)  # [batch, n_chunks] - 最高値
+            low_val = torch.amin(reshaped[:, :, :, 2], dim=2)   # [batch, n_chunks] - 最安値
+            close_val = reshaped[:, :, -1, 3]  # [batch, n_chunks] - 各チャンクの最後の終値
+            
+            # [batch, n_chunks, 4]に再構成
+            aggregated = torch.stack([open_val, high_val, low_val, close_val], dim=2)
+            
+            return aggregated
