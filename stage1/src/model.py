@@ -565,16 +565,26 @@ class Stage1Model(nn.Module):
             else:
                 z_pool = z.mean(dim=1)  # Fallback to regular mean
             
-            # 🔧 修正: 正しいbottleneckを通す（次元調整）
-            batch_size = z.size(0)
-            # z: [B, seq_len, d_model] → [B, 1, seq_len, d_model] → bottleneck
-            z_4d = z.unsqueeze(1)  # [B, 1, seq_len, d_model]
-            z_compressed = self.bottleneck(z_4d)  # [B, 1, latent_len, d_model]
-            z_latent = z_compressed.squeeze(1)  # [B, latent_len, d_model]
+            # 🔧 修正: AsyncモードではTF別簡易圧縮を使用
+            batch_size, seq_len, d_model = z.shape
+            
+            # TF固有のlatent_lenを計算（設定に基づく）
+            latent_len = self.config['model']['bottleneck']['latent_len']
+            
+            if seq_len <= latent_len:
+                # 既に十分短い場合はそのまま使用
+                z_latent = z
+            else:
+                # Adaptive average pooling で圧縮
+                # z: [B, seq_len, d_model] → [B, d_model, seq_len] → pool → [B, d_model, latent_len] → [B, latent_len, d_model]
+                z_transposed = z.transpose(1, 2)  # [B, d_model, seq_len]
+                z_pooled = torch.nn.functional.adaptive_avg_pool1d(z_transposed, latent_len)  # [B, d_model, latent_len]
+                z_latent = z_pooled.transpose(1, 2)  # [B, latent_len, d_model]
             
             # 🔍 Debug: latent形状確認（1回のみ）
             if not hasattr(self, '_latent_shape_printed'):
                 print(f"🔍 Latent shape: {z_latent.shape} (should be [B, latent_len, d_model])")
+                print(f"🔍 Original seq_len: {seq_len}, compressed to latent_len: {z_latent.shape[1]}")
                 self._latent_shape_printed = True
             
             # TF-specific decoder (latent_len=1として処理)
