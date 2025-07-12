@@ -313,9 +313,11 @@ class Stage1LightningModule(pl.LightningModule):
             # 🔥 CRITICAL FIX: targets→featuresから正しくm1データを取得
             m1_data = features.get('m1') if isinstance(features, dict) else None
             
-            # 🔧 Asyncモードではマスクなしとして処理（簡略化）
-            # 相関計算でマスク除外は別途NaN処理で対応
-            eval_masks = None
+            # 🔧 AsyncモードでもDrop-inマスク生成（ベクトル化版）
+            if eval_mask_ratio is not None and isinstance(features, dict):
+                eval_masks = self._make_eval_masks(features, eval_mask_ratio, batch_idx)
+            else:
+                eval_masks = None
             
             # 損失計算（Dict版）- マスクなしで計算
             losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
@@ -547,6 +549,25 @@ class Stage1LightningModule(pl.LightningModule):
                 correlations[tf_name] = torch.tensor(0.0, device=pred_tf.device)
                 
         return correlations
+    
+    def _make_eval_masks(self, features: Dict[str, torch.Tensor], eval_mask_ratio: float, batch_idx: int) -> Dict[str, torch.Tensor]:
+        """AsyncモードでのTF別eval_mask生成（ベクトル化版）"""
+        eval_masks = {}
+        
+        # 🔥 ベクトル化：Generator使用で再現性確保
+        device = next(self.parameters()).device
+        g = torch.Generator(device=device)
+        g.manual_seed(42 + batch_idx)  # シード固定で再現性
+        
+        for tf_name, tf_x in features.items():
+            B, L, _ = tf_x.shape
+            
+            # 🔥 一括マスク生成：rand → True/False マスクを一括計算
+            # True = マスクされた位置（相関計算から除外）
+            masks = torch.rand(B, L, generator=g, device=device) < eval_mask_ratio
+            eval_masks[tf_name] = masks
+        
+        return eval_masks
     
     def on_validation_epoch_end(self):
         """検証エポック終了時：val_corrの平均をプログレスバーに表示"""
