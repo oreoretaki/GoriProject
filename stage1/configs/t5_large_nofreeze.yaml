@@ -64,20 +64,20 @@ training:
 
 development:
   limit_train_batches: 2000   # 2000ステップでテスト
-  limit_val_batches: null     # フル検証（制限なし）
+  limit_val_batches: 1000     # 1000ステップで検証
 
 evaluation:
   # 全体のデフォルト
   eval_mask_ratio: 0.15
   
-  # TF ごとの上書き
+  # TF ごとの上書き（seq_len考慮調整）
   tf_specific_mask_ratios:
-    m1: 0.25  # 細粒度は難しいので高め
-    m5: 0.15
-    m15: 0.05 # シーケンスが短いので低く
-    m30: 0.22 # 標準より少し高め
-    h1: 0.28  # ★ 上げる
-    h4: 0.32  # ★ 上げる
+    m1: 0.25  # seq_len 128 → 32本masked
+    m5: 0.15  # seq_len 26 → 4本
+    m15: 0.05 # seq_len 9 → 0-1本
+    m30: 0.05 # ★ 下げる seq_len 5 → 0-1本  
+    h1: 0.20  # seq_len 3 → 1本
+    h4: 0.00  # ★ 最低に seq_len 1 → 0本（常に評価可能）
 
 logging:
   log_every_n_steps: 200
