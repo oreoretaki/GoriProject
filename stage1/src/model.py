@@ -565,10 +565,10 @@ class Stage1Model(nn.Module):
             else:
                 z_pool = z.mean(dim=1)  # Fallback to regular mean
             
-            # Async mode用の簡略化bottleneck: ダイレクトMLP
-            batch_size = z_pool.size(0)
-            # z_pool: [B, d_model] → [B, 1, d_model] (単一latent)
-            z_latent = z_pool.unsqueeze(1)  # [B, 1, d_model]
+            # 🔧 修正: 正しいbottleneckを通す
+            batch_size = z.size(0)
+            # z: [B, seq_len, d_model] → bottleneck → [B, latent_len, d_model]
+            z_latent = self.bottleneck(z)  # stride=8なら latent_len=16
             
             # TF-specific decoder (latent_len=1として処理)
             outputs[tf] = self.tf_decoders[tf](z_latent)  # [B, seq_len, 4]

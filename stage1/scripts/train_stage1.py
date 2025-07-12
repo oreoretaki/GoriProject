@@ -357,7 +357,7 @@ class Stage1LightningModule(pl.LightningModule):
             
         # 🔥 相関メトリクス計算（Dict対応）
         if async_sampler:
-            correlations = self._calculate_correlations_dict(outputs, targets)
+            correlations = self._calculate_correlations_dict(outputs, targets, masks=training_masks)
             timeframes = self.config['data']['timeframes']
             for tf_idx, tf_name in enumerate(timeframes):
                 if tf_name in correlations:
@@ -485,8 +485,8 @@ class Stage1LightningModule(pl.LightningModule):
                 
         return correlations
     
-    def _calculate_correlations_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Dict形式のTFごと相関計算（Model v2用）"""
+    def _calculate_correlations_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor], masks: Dict[str, torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """Dict形式のTFごと相関計算（マスク除外 + 標準化あり）"""
         correlations = {}
         
         for tf_name, pred_tf in pred.items():
@@ -495,29 +495,42 @@ class Stage1LightningModule(pl.LightningModule):
                 
             target_tf = target[tf_name]
             
-            # NaN値を除外（padding対応）
-            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
+            # 🔧 マスク除外: NaN + drop-in mask両方を考慮
+            nan_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len] - NaN除外
+            
+            if masks is not None and tf_name in masks:
+                # drop-inマスク（True=隠された位置）を除外
+                dropout_mask = ~masks[tf_name]  # [batch, seq_len] - マスク位置除外
+                valid_mask = nan_mask & dropout_mask
+            else:
+                valid_mask = nan_mask
             
             if valid_mask.sum() > 0:
                 # 有効な位置のみで相関計算
                 pred_valid = pred_tf[valid_mask]  # [valid_positions, 4]
                 target_valid = target_tf[valid_mask]  # [valid_positions, 4]
                 
-                if pred_valid.numel() > 0:
-                    # ピアソン相関（4つのOHLC特徴量の平均）
+                if pred_valid.numel() > 4:  # 最小サンプル数確保
+                    # 🔧 標準化ありピアソン相関（4つのOHLC特徴量の平均）
                     corr_ohlc = []
                     for feat_idx in range(4):
                         pred_feat = pred_valid[:, feat_idx]
                         target_feat = target_valid[:, feat_idx]
                         
-                        if pred_feat.numel() > 1:
-                            try:
-                                corr = torch.corrcoef(torch.stack([pred_feat, target_feat]))[0, 1]
-                                if not torch.isnan(corr):
-                                    corr_ohlc.append(corr)
-                            except RuntimeError:
-                                # corrcoef計算失敗時は0として扱う
-                                corr_ohlc.append(torch.tensor(0.0, device=pred_tf.device))
+                        # 標準化ありピアソン相関計算
+                        pred_std = pred_feat.std()
+                        target_std = target_feat.std()
+                        
+                        if pred_std > 1e-6 and target_std > 1e-6:
+                            # 標準化
+                            pred_norm = (pred_feat - pred_feat.mean()) / pred_std
+                            target_norm = (target_feat - target_feat.mean()) / target_std
+                            
+                            # ピアソン相関
+                            corr = (pred_norm * target_norm).mean()
+                            
+                            if not torch.isnan(corr):
+                                corr_ohlc.append(corr)
                                 
                     if corr_ohlc:
                         mean_corr = torch.mean(torch.stack(corr_ohlc))
