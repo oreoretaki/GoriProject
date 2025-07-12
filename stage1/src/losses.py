@@ -444,12 +444,13 @@ class Stage1CombinedLoss(nn.Module):
         return total_loss / max(total_count, 1)
     
     def _stft_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor], masks: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """Dict形式のSTFT損失計算（高速バッチ化版）"""
-        # 🔥 全TF・全特徴量を一括処理する高速実装
+        """Dict形式のSTFT損失計算（長さマスク対応 Ultra-Vectorized版）"""
+        # 🔥 全TF・全特徴量を一括処理 + 長さマスク対応
         all_pred_seqs = []
         all_target_seqs = []
+        original_lengths = []  # 🎯 元の長さを保持
         
-        # 1) 全データを収集（ループはデータ収集のみ）
+        # 1) 全データを収集 + 長さ情報保存
         for tf_name, pred_tf in pred.items():
             if tf_name not in target:
                 continue
@@ -462,81 +463,105 @@ class Stage1CombinedLoss(nn.Module):
             
             # 全特徴量を一括収集
             for feat_idx in range(n_features):
-                # [batch, seq_len] -> 有効部分のみ抽出してリストに追加
-                pred_feat = pred_tf[:, :, feat_idx]
-                target_feat = target_tf[:, :, feat_idx]
+                pred_feat = pred_tf[:, :, feat_idx]    # [batch, seq_len]
+                target_feat = target_tf[:, :, feat_idx] # [batch, seq_len]
                 
-                # 有効な部分のみを抽出（バッチ全体）
                 if valid_mask.any():
-                    # パディングして同じ長さに揃える（最大seq_len）
-                    all_pred_seqs.append(pred_feat)
-                    all_target_seqs.append(target_feat)
+                    # バッチ内の各サンプルを個別のシーケンスとして扱う
+                    for b in range(batch_size):
+                        # 🎯 有効長を計算（NaN以外の部分）
+                        valid_len = valid_mask[b].sum().item()
+                        if valid_len > 0:
+                            # 有効部分のみ抽出
+                            pred_seq = pred_feat[b, :valid_len]    # [valid_len]
+                            target_seq = target_feat[b, :valid_len] # [valid_len]
+                            
+                            all_pred_seqs.append(pred_seq)
+                            all_target_seqs.append(target_seq)
+                            original_lengths.append(valid_len)  # 🎯 元長さ保存
         
         if not all_pred_seqs:
-            return torch.tensor(0.0, device=pred.device)
+            return torch.tensor(0.0, device=list(pred.values())[0].device)
         
-        # 2) 全シーケンスをバッチ化 [total_seqs, max_seq_len] - パディング対応
-        if len(set(seq.shape[1] for seq in all_pred_seqs)) > 1:
-            # 異なる長さのテンソルをパディングして統一
-            max_len = max(seq.shape[1] for seq in all_pred_seqs)
-            padded_pred_seqs = []
-            padded_target_seqs = []
-            
-            for pred_seq, target_seq in zip(all_pred_seqs, all_target_seqs):
-                if pred_seq.shape[1] < max_len:
-                    pad_width = max_len - pred_seq.shape[1]
-                    pred_seq = F.pad(pred_seq, (0, pad_width), mode='constant', value=0)
-                    target_seq = F.pad(target_seq, (0, pad_width), mode='constant', value=0)
-                padded_pred_seqs.append(pred_seq)
-                padded_target_seqs.append(target_seq)
-            
-            pred_batch = torch.stack(padded_pred_seqs, dim=0)
-            target_batch = torch.stack(padded_target_seqs, dim=0)
-        else:
-            pred_batch = torch.stack(all_pred_seqs, dim=0)
-            target_batch = torch.stack(all_target_seqs, dim=0)
+        # 2) 🚀 pad_sequence で一括パディング（kernel効率化）
+        from torch.nn.utils.rnn import pad_sequence
+        
+        pred_batch = pad_sequence(all_pred_seqs, batch_first=True, padding_value=0.0)    # [N, max_len]
+        target_batch = pad_sequence(all_target_seqs, batch_first=True, padding_value=0.0) # [N, max_len]
+        
+        # 3) 🎯 長さマスク生成（有効部分のみ損失計算用）
+        max_len = pred_batch.shape[1]
+        length_mask = torch.zeros_like(pred_batch, dtype=torch.bool)  # [N, max_len]
+        for i, orig_len in enumerate(original_lengths):
+            length_mask[i, :orig_len] = True
         
         total_loss = 0.0
+        n_valid_scales = 0
         
-        # 3) 各スケールで一括STFT計算
+        # 4) 🔥 各スケールで一括STFT計算 + 長さマスク適用
         for scale in self.stft_loss.scales:
-            if pred_batch.shape[1] < scale:
+            if max_len < scale:
                 continue
                 
             hop_length = int(scale * self.stft_loss.hop_ratio)
+            n_valid_scales += 1
             
-            # 🔥 バッチ化STFT（36,864回 → 2回）
+            # 🔥 一括STFT計算（BF16回避）
             with torch.cuda.amp.autocast(enabled=False):
-                pred_batch_32 = pred_batch.float().cuda()
-                target_batch_32 = target_batch.float().cuda()
+                pred_batch_32 = pred_batch.float().cuda()   # [N, max_len]
+                target_batch_32 = target_batch.float().cuda() # [N, max_len]
                 
                 # 一括STFT計算
                 pred_stft = torch.stft(
-                    pred_batch_32.reshape(-1, pred_batch_32.shape[-1]),  # [batch*features, seq_len]
+                    pred_batch_32,  # [N, max_len]
                     n_fft=scale,
                     hop_length=hop_length,
                     return_complex=True
-                )
+                )  # [N, freq_bins, time_frames]
                 target_stft = torch.stft(
-                    target_batch_32.reshape(-1, target_batch_32.shape[-1]),
+                    target_batch_32,
                     n_fft=scale,
                     hop_length=hop_length,
                     return_complex=True
-                )
+                )  # [N, freq_bins, time_frames]
             
-            # マグニチュード損失
-            pred_mag = torch.abs(pred_stft)
-            target_mag = torch.abs(target_stft)
-            mag_loss = F.l1_loss(pred_mag, target_mag)
+            # 🎯 スペクトログラム用長さマスク生成（time方向）
+            time_frames = pred_stft.shape[-1]
+            # 元信号の長さからSTFTフレーム数を計算
+            stft_mask = torch.zeros(len(original_lengths), time_frames, device=pred_batch.device, dtype=torch.bool)
+            for i, orig_len in enumerate(original_lengths):
+                # 有効なSTFTフレーム数を計算
+                valid_frames = max(1, (orig_len - scale) // hop_length + 1)
+                valid_frames = min(valid_frames, time_frames)
+                stft_mask[i, :valid_frames] = True
             
-            # 位相損失
-            phase_loss = F.l1_loss(pred_stft.real, target_stft.real) + \
-                        F.l1_loss(pred_stft.imag, target_stft.imag)
+            # マグニチュード損失（🎯 有効部分のみ）
+            pred_mag = torch.abs(pred_stft)    # [N, freq_bins, time_frames]
+            target_mag = torch.abs(target_stft) # [N, freq_bins, time_frames]
+            
+            # マスク適用: [N, freq_bins, time_frames] × [N, 1, time_frames]
+            stft_mask_expanded = stft_mask.unsqueeze(1)  # [N, 1, time_frames]
+            valid_pred_mag = pred_mag * stft_mask_expanded
+            valid_target_mag = target_mag * stft_mask_expanded
+            
+            # 🎯 有効部分のみで損失計算
+            mag_diff = torch.abs(valid_pred_mag - valid_target_mag)
+            mag_loss = mag_diff.sum() / (stft_mask.sum() * pred_stft.shape[1] + 1e-8)  # 正規化
+            
+            # 位相損失（🎯 有効部分のみ）
+            valid_pred_real = pred_stft.real * stft_mask_expanded
+            valid_target_real = target_stft.real * stft_mask_expanded
+            valid_pred_imag = pred_stft.imag * stft_mask_expanded
+            valid_target_imag = target_stft.imag * stft_mask_expanded
+            
+            real_diff = torch.abs(valid_pred_real - valid_target_real)
+            imag_diff = torch.abs(valid_pred_imag - valid_target_imag)
+            phase_loss = (real_diff.sum() + imag_diff.sum()) / (stft_mask.sum() * pred_stft.shape[1] * 2 + 1e-8)
             
             total_loss += mag_loss + 0.1 * phase_loss
         
         # 正規化
-        return total_loss / max(len(self.stft_loss.scales), 1)
+        return total_loss / max(n_valid_scales, 1)
     
     def _amp_phase_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Dict形式の振幅位相損失計算"""
