@@ -63,8 +63,8 @@ training:
     pct_start: 0.10
 
 development:
-  limit_train_batches: 1000   # テスト用短縮実行
-  limit_val_batches: 200
+  limit_train_batches: null   # フル訓練（制限なし）
+  limit_val_batches: null     # フル検証（制限なし）
 
 evaluation:
   eval_mask_ratio: 0.15
