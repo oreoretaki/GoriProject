@@ -40,6 +40,15 @@ if hasattr(torch, '_dynamo'):
     torch._dynamo.config.capture_scalar_outputs = True
     print("✅ TorchDynamo スカラー出力キャプチャ有効化")
 
+# FlashAttention 2 / xFormers最適化を有効化
+try:
+    import xformers
+    import xformers.ops
+    torch.backends.cuda.enable_flash_sdp(True)
+    print("✅ FlashAttention 2 & xFormers有効化")
+except ImportError:
+    print("⚠️ xFormers未インストール - 標準Attentionを使用")
+
 print("✅ TF32とTensor Core最適化を有効化")
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor, TQDMProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
