@@ -363,10 +363,18 @@ class Stage1CombinedLoss(nn.Module):
         """
         device = list(pred.values())[0].device
         
-        # 各損失計算
+        # 各損失計算 - 重み0の損失はスキップしてNaN回避
         recon_loss = self._huber_loss_dict(pred, target, masks)
-        spec_loss = self._stft_loss_dict(pred, target, masks)
-        amp_phase_loss = self._amp_phase_loss_dict(pred, target)
+        
+        if self.weights['spec_tf'] > 0:
+            spec_loss = self._stft_loss_dict(pred, target, masks)
+        else:
+            spec_loss = torch.zeros((), device=device)
+            
+        if self.weights['amp_phase'] > 0:
+            amp_phase_loss = self._amp_phase_loss_dict(pred, target)
+        else:
+            amp_phase_loss = torch.zeros((), device=device)
         
         # クロス損失（M1データが提供された場合のみ）
         if m1_data is not None and 'm1' in pred:
@@ -461,6 +469,9 @@ class Stage1CombinedLoss(nn.Module):
                 continue
                 
             target_tf = target[tf_name]
+            # 🔧 NaN除去: パディング位置をゼロ埋めしてSTFT/FFTに安全入力
+            target_tf = torch.nan_to_num(target_tf, nan=0.0, posinf=0.0, neginf=0.0)
+            pred_tf = torch.nan_to_num(pred_tf, nan=0.0, posinf=0.0, neginf=0.0)
             batch_size, seq_len, n_features = pred_tf.shape
             
             # NaN値を除外（padding対応）
@@ -584,6 +595,9 @@ class Stage1CombinedLoss(nn.Module):
                 continue
                 
             target_tf = target[tf_name]
+            # 🔧 NaN除去: パディング位置をゼロ埋めしてFFTに安全入力
+            target_tf = torch.nan_to_num(target_tf, nan=0.0, posinf=0.0, neginf=0.0)
+            pred_tf = torch.nan_to_num(pred_tf, nan=0.0, posinf=0.0, neginf=0.0)
             batch_size, seq_len, n_features = pred_tf.shape
             
             # NaN値を除外（padding対応）

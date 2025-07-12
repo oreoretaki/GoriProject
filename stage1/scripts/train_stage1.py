@@ -186,7 +186,9 @@ class Stage1LightningModule(pl.LightningModule):
             
             # M1データを抽出（クロス損失用）
             # 🔥 CRITICAL FIX: targets→featuresから正しくm1データを取得
-            m1_data = features.get('m1') if isinstance(features, dict) else None
+            m1_raw = features.get('m1') if isinstance(features, dict) else None
+            # 🔧 NaN除去: クロスTF整合性計算でのNaN伝播防止
+            m1_data = torch.nan_to_num(m1_raw, nan=0.0) if m1_raw is not None else None
             
             # 損失計算（Dict版）
             losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
@@ -311,7 +313,9 @@ class Stage1LightningModule(pl.LightningModule):
             
             # M1データを抽出（クロス損失用）
             # 🔥 CRITICAL FIX: targets→featuresから正しくm1データを取得
-            m1_data = features.get('m1') if isinstance(features, dict) else None
+            m1_raw = features.get('m1') if isinstance(features, dict) else None
+            # 🔧 NaN除去: クロスTF整合性計算でのNaN伝播防止
+            m1_data = torch.nan_to_num(m1_raw, nan=0.0) if m1_raw is not None else None
             
             # 🔧 AsyncモードでもDrop-inマスク生成（ベクトル化版）- 必ず生成
             if isinstance(features, dict):
