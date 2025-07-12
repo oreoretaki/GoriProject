@@ -508,9 +508,9 @@ class Stage1LightningModule(pl.LightningModule):
                 
             target_tf = target[tf_name]
             
-            # 🔧 マスク除外: NaN + 0パディング + drop-in mask全てを考慮
-            nan_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len] - NaN除外
-            padding_mask = ~(pred_tf.abs().sum(-1) == 0)  # [batch, seq_len] - 0パディング除外
+            # 🔧 マスク除外: target基準で判定（pred依存バグ修正）
+            nan_mask = ~torch.isnan(target_tf[..., 0])  # [batch, seq_len] - 教師のNaN除外
+            padding_mask = ~(target_tf.abs().sum(-1) == 0)  # [batch, seq_len] - 教師の0パディング除外
             
             if masks is not None and tf_name in masks:
                 # drop-inマスク（True=隠された位置）を除外
