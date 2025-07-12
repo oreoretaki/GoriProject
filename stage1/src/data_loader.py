@@ -54,8 +54,8 @@ def collate_multiscale(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.
                     batch_first=True, 
                     padding_value=float('nan')
                 )
-                # dtype統一（AMP互換性のため）
-                result['features'][tf_name] = torch.nan_to_num(padded_tensor).to(torch.float32)
+                # dtype統一（AMP互換性のため）- NaNを保持してマスク計算で除外
+                result['features'][tf_name] = padded_tensor.to(torch.float32)
         
         # targetsを処理
         if 'targets' in sample:
@@ -71,8 +71,8 @@ def collate_multiscale(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.
                     batch_first=True, 
                     padding_value=float('nan')
                 )
-                # dtype統一（AMP互換性のため）
-                result['targets'][tf_name] = torch.nan_to_num(padded_tensor).to(torch.float32)
+                # dtype統一（AMP互換性のため）- NaNを保持してマスク計算で除外
+                result['targets'][tf_name] = padded_tensor.to(torch.float32)
         
         return result
     else:
@@ -223,9 +223,9 @@ class Stage1Dataset(Dataset):
                 tf_feat_tensor = torch.tensor(tf_feat_norm, dtype=torch.float32)
                 tf_targ_tensor = torch.tensor(tf_targ_norm, dtype=torch.float32)
                 
-                # 🔥 NaN伝播防止: NaN→0に変換
-                tf_features[tf_name] = torch.nan_to_num(tf_feat_tensor, nan=0.0)
-                tf_targets[tf_name] = torch.nan_to_num(tf_targ_tensor, nan=0.0)
+                # 🔥 NaN保持: パディング位置のマスク計算で使用
+                tf_features[tf_name] = tf_feat_tensor
+                tf_targets[tf_name] = tf_targ_tensor
             
             return {
                 'features': tf_features,  # Dict[tf_name, torch.Tensor]
