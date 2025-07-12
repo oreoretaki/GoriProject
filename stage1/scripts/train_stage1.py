@@ -313,6 +313,10 @@ class Stage1LightningModule(pl.LightningModule):
             # 🔥 CRITICAL FIX: targets→featuresから正しくm1データを取得
             m1_data = features.get('m1') if isinstance(features, dict) else None
             
+            # 🔧 Asyncモードではマスクなしとして処理（簡略化）
+            # 相関計算でマスク除外は別途NaN処理で対応
+            eval_masks = None
+            
             # 損失計算（Dict版）- マスクなしで計算
             losses = self.criterion(outputs, targets, masks=None, m1_data={'m1': m1_data} if m1_data is not None else None)
         else:
