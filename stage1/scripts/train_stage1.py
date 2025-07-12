@@ -320,7 +320,7 @@ class Stage1LightningModule(pl.LightningModule):
             if eval_mask_ratio is not None:
                 # 🔥 eval_mask_ratio指定時：カスタムマスクを生成
                 batch_size, n_tf, seq_len, n_features = features.shape
-                training_masks = torch.stack([
+                eval_masks = torch.stack([
                     self.model.masking_strategy.generate_masks(
                         features[b], 
                         seed=batch_idx * batch_size + b, 
@@ -329,7 +329,7 @@ class Stage1LightningModule(pl.LightningModule):
                     for b in range(batch_size)
                 ], dim=0)  # [batch, n_tf, seq_len]
             else:
-                training_masks = None
+                eval_masks = None
             
             # Forward pass（Legacy API）
             outputs = self.model(features, eval_mask_ratio=eval_mask_ratio)
@@ -339,7 +339,7 @@ class Stage1LightningModule(pl.LightningModule):
             m1_data = targets[:, 0]
             
             # 損失計算（tensor版）
-            losses = self.criterion(reconstructed, targets, masks=training_masks, m1_data=m1_data)
+            losses = self.criterion(reconstructed, targets, masks=eval_masks, m1_data=m1_data)
         
         # ◆ 検証損失をプログレスバーに表示（エポック終了時）
         self.log("val_loss", losses['total'],
@@ -357,7 +357,7 @@ class Stage1LightningModule(pl.LightningModule):
             
         # 🔥 相関メトリクス計算（Dict対応）
         if async_sampler:
-            correlations = self._calculate_correlations_dict(outputs, targets, masks=training_masks)
+            correlations = self._calculate_correlations_dict(outputs, targets, masks=eval_masks)
             timeframes = self.config['data']['timeframes']
             for tf_idx, tf_name in enumerate(timeframes):
                 if tf_name in correlations:

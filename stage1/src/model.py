@@ -570,6 +570,11 @@ class Stage1Model(nn.Module):
             # z: [B, seq_len, d_model] → bottleneck → [B, latent_len, d_model]
             z_latent = self.bottleneck(z)  # stride=8なら latent_len=16
             
+            # 🔍 Debug: latent形状確認（1回のみ）
+            if not hasattr(self, '_latent_shape_printed'):
+                print(f"🔍 Latent shape: {z_latent.shape} (should be [B, latent_len, d_model])")
+                self._latent_shape_printed = True
+            
             # TF-specific decoder (latent_len=1として処理)
             outputs[tf] = self.tf_decoders[tf](z_latent)  # [B, seq_len, 4]
         
