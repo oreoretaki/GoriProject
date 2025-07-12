@@ -36,7 +36,7 @@ loss:
   stft_scales: [64, 128]
 
 training:
-  batch_size: 192  # 80 GB H100 で安全
+  batch_size: 256  # H100最大活用サイズ
   accumulate_grad_batches: 1
   epochs: 7
   precision: "bf16-mixed"
@@ -49,12 +49,12 @@ training:
     min_delta: 0.001
   optimizer:
     name: AdamW
-    lr: 3.0e-3  # 線形スケーリング (32→192 で ×6)
+    lr: 4.0e-3  # 線形スケーリング (192→256 で ×1.333)
     betas: [0.9, 0.98]
     weight_decay: 0.01
   scheduler:
     name: linear_with_warmup
-    max_lr: 3.0e-3
+    max_lr: 4.0e-3  # バッチサイズ256用
     num_warmup_steps: 1000
     interval: "step"
     div_factor: 10.0
