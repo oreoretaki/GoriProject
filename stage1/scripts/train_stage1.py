@@ -114,14 +114,14 @@ class CustomProgressBar(TQDMProgressBar):
         return filtered
 
 class MemoryManagementCallback(Callback):
-    """🔥 メモリ管理コールバック - DataFrameリーク対策"""
+    """🔥 メモリ管理コールバック - 高頻度実行回避"""
     
-    def __init__(self, gc_every_n_steps: int = 20):
+    def __init__(self, gc_every_n_steps: int = 1000):  # 🔥 20→1000に変更
         super().__init__()
         self.gc_every_n_steps = gc_every_n_steps
         
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        """20ステップごとにGC実行"""
+        """1000ステップごとにGC実行（パフォーマンス重視）"""
         if batch_idx % self.gc_every_n_steps == 0:
             # ① 循環参照を即回収
             gc.collect()
@@ -129,8 +129,7 @@ class MemoryManagementCallback(Callback):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            if batch_idx % (self.gc_every_n_steps * 5) == 0:  # 100ステップごとにログ
-                print(f"🗑️ GC executed at step {batch_idx}")
+            print(f"🗑️ GC executed at step {batch_idx}")
 
 class Stage1LightningModule(pl.LightningModule):
     """Stage 1 PyTorch Lightning モジュール"""
@@ -445,7 +444,13 @@ class Stage1LightningModule(pl.LightningModule):
         return losses['total']
         
     def _calculate_correlations(self, pred, target, training_masks):
-        """TFごとの相関を計算（マスク位置のみ）"""
+        """TFごとの相関を計算（マスク位置のみ）- 高速バッチ化版"""
+        # 🔥 相関計算は検証時のみ必要、訓練時はスキップ
+        if self.training:
+            # 訓練中はダミー値を返す（ログ不要）
+            n_tf = pred.size(1)
+            return [torch.tensor(0.0, device=pred.device) for _ in range(n_tf)]
+        
         correlations = []
         
         for tf_idx in range(pred.size(1)):
@@ -455,24 +460,22 @@ class Stage1LightningModule(pl.LightningModule):
             
             # マスクされた部分のみで相関計算
             if mask_tf.sum() > 0:
-                pred_masked = pred_tf[mask_tf]  # [n_masked, 4] - 既にbool型
+                pred_masked = pred_tf[mask_tf]  # [n_masked, 4]
                 target_masked = target_tf[mask_tf]
                 
-                if pred_masked.numel() > 0:
-                    # ピアソン相関（4つのOHLC特徴量の平均）
-                    corr_ohlc = []
-                    for feat_idx in range(4):
-                        pred_feat = pred_masked[:, feat_idx]
-                        target_feat = target_masked[:, feat_idx]
-                        
-                        if pred_feat.numel() > 1:
-                            corr = torch.corrcoef(torch.stack([pred_feat, target_feat]))[0, 1]
-                            if not torch.isnan(corr):
-                                corr_ohlc.append(corr)
-                                
-                    if corr_ohlc:
-                        mean_corr = torch.mean(torch.stack(corr_ohlc))
-                        correlations.append(mean_corr)
+                if pred_masked.numel() > 4:  # 最低4サンプル必要
+                    # 🔥 バッチ化相関計算（4特徴量を一括処理）
+                    # 標準化
+                    pred_norm = (pred_masked - pred_masked.mean(dim=0, keepdim=True)) / (pred_masked.std(dim=0, keepdim=True) + 1e-8)
+                    target_norm = (target_masked - target_masked.mean(dim=0, keepdim=True)) / (target_masked.std(dim=0, keepdim=True) + 1e-8)
+                    
+                    # 相関係数 = 標準化後の内積 / N
+                    corr_per_feature = (pred_norm * target_norm).mean(dim=0)  # [4]
+                    
+                    # NaN除外して平均
+                    valid_corr = corr_per_feature[~torch.isnan(corr_per_feature)]
+                    if valid_corr.numel() > 0:
+                        correlations.append(valid_corr.mean())
                     else:
                         correlations.append(torch.tensor(0.0, device=pred.device))
                 else:

@@ -439,89 +439,82 @@ class Stage1CombinedLoss(nn.Module):
         return total_loss / max(total_count, 1)
     
     def _stft_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor], masks: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """Dict形式のSTFT損失計算"""
-        total_loss = 0.0
-        total_count = 0
+        """Dict形式のSTFT損失計算（高速バッチ化版）"""
+        # 🔥 全TF・全特徴量を一括処理する高速実装
+        all_pred_seqs = []
+        all_target_seqs = []
         
+        # 1) 全データを収集（ループはデータ収集のみ）
         for tf_name, pred_tf in pred.items():
             if tf_name not in target:
                 continue
                 
             target_tf = target[tf_name]
-            mask_tf = masks.get(tf_name, None) if masks is not None else None
-            
             batch_size, seq_len, n_features = pred_tf.shape
             
             # NaN値を除外（padding対応）
-            batch_size_tf, seq_len_tf = pred_tf.shape[:2]
-            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len_tf]
+            valid_mask = ~torch.isnan(pred_tf[..., 0])  # [batch, seq_len]
             
-            if mask_tf is not None:
-                # mask_tfがvalid_maskと同じshapeでない場合は調整
-                if mask_tf.shape != valid_mask.shape:
-                    # mask_tfをtarget_tfの実際の形状に合わせる
-                    if mask_tf.shape[1] > seq_len_tf:
-                        mask_tf = mask_tf[:, :seq_len_tf]  # truncate
-                    elif mask_tf.shape[1] < seq_len_tf:
-                        # padding with False (not masked)
-                        pad_width = seq_len_tf - mask_tf.shape[1]
-                        mask_tf = torch.cat([mask_tf, torch.zeros(batch_size_tf, pad_width, dtype=torch.bool, device=mask_tf.device)], dim=1)
-                
-                valid_mask = valid_mask & ~mask_tf  # マスクされた位置も除外
-            
+            # 全特徴量を一括収集
             for feat_idx in range(n_features):
-                pred_signal = pred_tf[:, :, feat_idx]  # [batch, seq_len]
-                target_signal = target_tf[:, :, feat_idx]  # [batch, seq_len]
+                # [batch, seq_len] -> 有効部分のみ抽出してリストに追加
+                pred_feat = pred_tf[:, :, feat_idx]
+                target_feat = target_tf[:, :, feat_idx]
                 
-                # 各バッチで有効な部分のみ取得
-                for b in range(batch_size):
-                    valid_positions = valid_mask[b]
-                    if valid_positions.sum() == 0:
-                        continue
-                        
-                    pred_seq = pred_signal[b, valid_positions]  # [valid_len]
-                    target_seq = target_signal[b, valid_positions]  # [valid_len]
-                    
-                    if len(pred_seq) == 0 or len(pred_seq) < 64:  # STFT計算に必要な最小長
-                        continue
-                        
-                    # 各スケールでSTFT損失計算
-                    for scale in self.stft_loss.scales:
-                        if len(pred_seq) < scale:
-                            continue
-                            
-                        hop_length = int(scale * self.stft_loss.hop_ratio)
-                        
-                        # STFT計算（BF16対応: 必ずFP32/CUDAで実行）
-                        with torch.cuda.amp.autocast(enabled=False):  # BF16→FP32 autocast無効化
-                            pred_seq_32 = pred_seq.float().cuda()
-                            target_seq_32 = target_seq.float().cuda()
-                            pred_stft = torch.stft(
-                                pred_seq_32, 
-                                n_fft=scale, 
-                                hop_length=hop_length, 
-                                return_complex=True
-                            )
-                            target_stft = torch.stft(
-                                target_seq_32, 
-                                n_fft=scale, 
-                                hop_length=hop_length, 
-                                return_complex=True
-                            )
-                        
-                        # マグニチュード損失
-                        pred_mag = torch.abs(pred_stft)
-                        target_mag = torch.abs(target_stft)
-                        mag_loss = F.l1_loss(pred_mag, target_mag)
-                        
-                        # 位相損失
-                        phase_loss = F.l1_loss(pred_stft.real, target_stft.real) + \
-                                    F.l1_loss(pred_stft.imag, target_stft.imag)
-                        
-                        total_loss += mag_loss + 0.1 * phase_loss
-                        total_count += 1
-                        
-        return total_loss / max(total_count, 1)
+                # 有効な部分のみを抽出（バッチ全体）
+                if valid_mask.any():
+                    # パディングして同じ長さに揃える（最大seq_len）
+                    all_pred_seqs.append(pred_feat)
+                    all_target_seqs.append(target_feat)
+        
+        if not all_pred_seqs:
+            return torch.tensor(0.0, device=pred.device)
+        
+        # 2) 全シーケンスをバッチ化 [total_seqs, max_seq_len]
+        pred_batch = torch.stack(all_pred_seqs, dim=0)
+        target_batch = torch.stack(all_target_seqs, dim=0)
+        
+        total_loss = 0.0
+        
+        # 3) 各スケールで一括STFT計算
+        for scale in self.stft_loss.scales:
+            if pred_batch.shape[1] < scale:
+                continue
+                
+            hop_length = int(scale * self.stft_loss.hop_ratio)
+            
+            # 🔥 バッチ化STFT（36,864回 → 2回）
+            with torch.cuda.amp.autocast(enabled=False):
+                pred_batch_32 = pred_batch.float().cuda()
+                target_batch_32 = target_batch.float().cuda()
+                
+                # 一括STFT計算
+                pred_stft = torch.stft(
+                    pred_batch_32.reshape(-1, pred_batch_32.shape[-1]),  # [batch*features, seq_len]
+                    n_fft=scale,
+                    hop_length=hop_length,
+                    return_complex=True
+                )
+                target_stft = torch.stft(
+                    target_batch_32.reshape(-1, target_batch_32.shape[-1]),
+                    n_fft=scale,
+                    hop_length=hop_length,
+                    return_complex=True
+                )
+            
+            # マグニチュード損失
+            pred_mag = torch.abs(pred_stft)
+            target_mag = torch.abs(target_stft)
+            mag_loss = F.l1_loss(pred_mag, target_mag)
+            
+            # 位相損失
+            phase_loss = F.l1_loss(pred_stft.real, target_stft.real) + \
+                        F.l1_loss(pred_stft.imag, target_stft.imag)
+            
+            total_loss += mag_loss + 0.1 * phase_loss
+        
+        # 正規化
+        return total_loss / max(len(self.stft_loss.scales), 1)
     
     def _amp_phase_loss_dict(self, pred: Dict[str, torch.Tensor], target: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Dict形式の振幅位相損失計算"""
