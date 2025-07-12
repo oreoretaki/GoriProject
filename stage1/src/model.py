@@ -565,10 +565,12 @@ class Stage1Model(nn.Module):
             else:
                 z_pool = z.mean(dim=1)  # Fallback to regular mean
             
-            # 🔧 修正: 正しいbottleneckを通す
+            # 🔧 修正: 正しいbottleneckを通す（次元調整）
             batch_size = z.size(0)
-            # z: [B, seq_len, d_model] → bottleneck → [B, latent_len, d_model]
-            z_latent = self.bottleneck(z)  # stride=8なら latent_len=16
+            # z: [B, seq_len, d_model] → [B, 1, seq_len, d_model] → bottleneck
+            z_4d = z.unsqueeze(1)  # [B, 1, seq_len, d_model]
+            z_compressed = self.bottleneck(z_4d)  # [B, 1, latent_len, d_model]
+            z_latent = z_compressed.squeeze(1)  # [B, latent_len, d_model]
             
             # 🔍 Debug: latent形状確認（1回のみ）
             if not hasattr(self, '_latent_shape_printed'):
