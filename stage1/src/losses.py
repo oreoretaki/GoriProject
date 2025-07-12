@@ -475,9 +475,26 @@ class Stage1CombinedLoss(nn.Module):
         if not all_pred_seqs:
             return torch.tensor(0.0, device=pred.device)
         
-        # 2) 全シーケンスをバッチ化 [total_seqs, max_seq_len]
-        pred_batch = torch.stack(all_pred_seqs, dim=0)
-        target_batch = torch.stack(all_target_seqs, dim=0)
+        # 2) 全シーケンスをバッチ化 [total_seqs, max_seq_len] - パディング対応
+        if len(set(seq.shape[1] for seq in all_pred_seqs)) > 1:
+            # 異なる長さのテンソルをパディングして統一
+            max_len = max(seq.shape[1] for seq in all_pred_seqs)
+            padded_pred_seqs = []
+            padded_target_seqs = []
+            
+            for pred_seq, target_seq in zip(all_pred_seqs, all_target_seqs):
+                if pred_seq.shape[1] < max_len:
+                    pad_width = max_len - pred_seq.shape[1]
+                    pred_seq = F.pad(pred_seq, (0, pad_width), mode='constant', value=0)
+                    target_seq = F.pad(target_seq, (0, pad_width), mode='constant', value=0)
+                padded_pred_seqs.append(pred_seq)
+                padded_target_seqs.append(target_seq)
+            
+            pred_batch = torch.stack(padded_pred_seqs, dim=0)
+            target_batch = torch.stack(padded_target_seqs, dim=0)
+        else:
+            pred_batch = torch.stack(all_pred_seqs, dim=0)
+            target_batch = torch.stack(all_target_seqs, dim=0)
         
         total_loss = 0.0
         
